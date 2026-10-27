@@ -7,19 +7,21 @@ Primary reference: [MODBUS over Serial Line Specification and Implementation Gui
 - RTU ADU **encoding/decoding**, allowed address range `0..=247`, generic nonzero function byte, maximum 256 bytes, CRC16 (initial `0xffff`, polynomial `0xa001`) transmitted low byte first.
 - `RtuTiming` with **11-bit** Modbus RTU character format. For baud rates <=19200, `t1.5` and `t3.5` are character-time based, rounded up in integer nanoseconds. At >19200, the *recommended* fixed 750us and 1750us timers are used.
 - `RtuReceiver` processes one **UART character-completion** event per byte and rejects a frame for inter-character gaps greater than `t1.5`; it finalizes only after `t3.5` silence. A partial frame / CRC error produces a typed `Discarded` result.
-- Cross-crate test over VEN's existing RS-485 shared bus: encoded request -> physical broadcast -> decode, followed by a separately scheduled reply after the minimum silence. Another test verifies overlapping transmitters cause diagnostics, not fabricated valid packets.
+- `ven-sim::send_rs485_uart` emits true virtual-timestamped UART character-completion events, with deterministic `DropByte`, `CorruptByte`, and `GapAfter` fault modes. This is a character-timed model, not voltage/bit-accurate physical sampling.
+- `ven-modbus::session` provides one-outstanding-request master state, response validation, timeout and exception handling, Modbus 0x03 and 0x06 slave handlers, register values and broadcast write-without-reply semantics.
+- `ven-modbus-sim` binds per-port `RtuReceiver`s to VEN characters, runs receive-flush and timeout deadlines under the shared `TimeGrant`, and automatically transmits slave replies after the RTU frame silence. End-to-end integration tests cover addressed reads, broadcast writes, CRC faults/timeouts and collision behavior.
 
 ## Not implemented
 
-- Modbus master/slave application state machines, register map, interpretation of function codes, broadcast-write authorization, exception response rules, transaction timeouts, retries or serial turnaround control.
-- Automatic enforcement of `t3.5` by the shared RS-485 bus: the bus does not know that Modbus is running above it.
-- Byte-level UART emission from `VenNetwork`: `send_rs485` still sends an **opaque whole frame**, so the RtuReceiver is only driven by individually timestamped bytes supplied by an explicit caller. Modbus t1.5 fault-injection needs a UART-character event source before integration into end-to-end network simulation.
-- Address filtering in the RS-485 physical layer. **Physical reception of a frame by all ports does not mean every Modbus slave accepts the request**. Real Modbus receivers filter by slave address.
+- Full Modbus application model: only functions 0x03 and 0x06 are implemented; remaining function codes, full register/device configuration and extended exception policies are not. Automatic retries are not implemented. Per-device turnaround is implicit at `t3.5`, without transceiver DE/RE timing.
+- The raw RS-485 bus does not enforce `t3.5`; only the `ven-modbus-sim` protocol adapter schedules responder behavior after `t3.5`. Direct raw network sends can violate Modbus timing.
+- `send_rs485_uart` supports virtual character events. The legacy `send_rs485` retains opaque **whole-frame** behavior for compatibility, and is not interpreted as Modbus UART input by the adapter.
+- Modbus address filtering occurs in the dedicated protocol endpoint, **not** inside the RS-485 physical medium, which still broadcasts sampled characters.
 - Modbus TCP, ASCII, electrical waveform, reflections, termination, biasing, or certification.
 
 ## Next vertical slice
 
-1. Add explicit UART character emission timing events and error injection in a serial-link adapter, not to `ven-medium`'s Ethernet models.
-2. Connect `RtuReceiver` per attached device, including address filtering and silent periods.
-3. Build a master-request/slave-response state machine, with one outstanding transaction, broadcast without response, and protocol-specific timeouts.
-4. Test collision/partial-frames, t1.5/t3.5, CRC, and response timeouts against independent reference traces.
+1. Add immediate collision-invalidation events (a currently detected overlap is reported at modeled transmission completion) and per-device turnaround/release delays.
+2. Extend Modbus function handling, physical register maps, exception policy and explicit scheduled retries.
+3. Expand high-fidelity UART/RS-485 fault models and independently validate against real reference traces/hardware.
+4. Add property-based and randomized differential tests for t1.5/t3.5 and character rounding boundaries.

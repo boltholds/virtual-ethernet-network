@@ -4,6 +4,8 @@
 //! Modbus register map, automatic master/slave transactions or wall clocks.
 //! Reference: MODBUS over Serial Line Specification V1.02, §§2.2, 2.5.1, 6.2.2.
 
+pub mod session;
+
 use sim_time::{SimDuration, SimInstant};
 use ven_medium::rs485::{Rs485Error, UartFormat};
 

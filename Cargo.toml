@@ -8,6 +8,7 @@ members = [
     "crates/ven-scheduler",
     "crates/ven-medium",
     "crates/ven-modbus",
+    "crates/ven-modbus-sim",
     "crates/ven-sim",
 ]
 
