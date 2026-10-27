@@ -64,6 +64,22 @@ impl Rs485Medium {
         Ok(Self { baud_rate, uart, propagation })
     }
 
+    /// Completion of the Nth character, using cumulative bit arithmetic so
+    /// rounding does not drift by one nanosecond per byte.
+    pub fn character_arrival(&self, count: usize, now: SimInstant) -> Result<SimInstant, Rs485Error> {
+        if count == 0 { return Err(Rs485Error::EmptyTransmission); }
+        let bits = (count as u128)
+            .checked_mul(self.uart.bits_per_character()? as u128)
+            .ok_or(Rs485Error::TimeOverflow)?;
+        let numerator = bits.checked_mul(NANOS_PER_SECOND).ok_or(Rs485Error::TimeOverflow)?;
+        let denominator = self.baud_rate as u128;
+        let ns = numerator / denominator + u128::from(numerator % denominator != 0);
+        let ns = u64::try_from(ns).map_err(|_| Rs485Error::TimeOverflow)?;
+        now.checked_add(SimDuration::from_nanos(ns))
+            .and_then(|time| time.checked_add(self.propagation))
+            .ok_or(Rs485Error::TimeOverflow)
+    }
+
     /// Models one uninterrupted UART character stream starting NOW. No bus
     /// arbitration or automatic queueing: simultaneous drivers are possible.
     pub fn transmission(&self, bytes: usize, now: SimInstant) -> Result<Rs485TransmissionWindow, Rs485Error> {
@@ -93,6 +109,15 @@ mod tests {
         let window = bus.transmission(1, SimInstant::ZERO).unwrap();
         assert_eq!(window.finishes.as_nanos(), 1_145_834);
         assert_eq!(UartFormat::MODBUS_RTU_8N2.bits_per_character(), Ok(11));
+    }
+
+    #[test]
+    fn cumulative_character_arrivals_are_exactly_rounded() {
+        let bus = Rs485Medium::new(9600, UartFormat::MODBUS_RTU_8E1, SimDuration::ZERO).unwrap();
+        assert_eq!(bus.character_arrival(1, SimInstant::ZERO).unwrap().as_nanos(), 1_145_834);
+        assert_eq!(bus.character_arrival(3, SimInstant::ZERO).unwrap().as_nanos(), 3_437_500);
+        assert_eq!(bus.character_arrival(3, SimInstant::ZERO).unwrap(),
+                   bus.transmission(3, SimInstant::ZERO).unwrap().arrives);
     }
 
     #[test]

@@ -15,6 +15,7 @@ pub enum VenError {
     NoLink,
     MissingBus,
     TransmitterBusy,
+    InvalidUartFault,
     TransmissionIdExhausted,
     Topology(TopologyError),
     Link(LinkError),
@@ -36,12 +37,24 @@ impl std::error::Error for VenError {}
 pub enum NetworkOutput {
     Frame(FrameArrival),
     Rs485Contention { bus: BusId, sender: PortId },
+    UartCharacter { bus: BusId, from: PortId, to: PortId, byte: u8 },
+}
+
+/// One optional deterministic impairment per UART transmission.
+/// Models character-level faults, not an electrical voltage waveform.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UartFault {
+    None,
+    GapAfter { index: usize, silence: SimDuration },
+    CorruptByte { index: usize, xor_mask: u8 },
+    DropByte { index: usize },
 }
 
 #[derive(Clone, Debug)]
 enum LocalEvent {
     Ethernet(FrameArrival),
     Rs485Complete(u64),
+    Rs485Character { txid: u64, byte: u8 },
 }
 
 #[derive(Clone, Debug)]
@@ -52,6 +65,7 @@ struct Rs485InFlight {
     finishes: SimInstant,
     frame: Frame,
     contended: bool,
+    uart: bool,
 }
 
 /// This participant never advances the coordinator's global time.
@@ -167,10 +181,69 @@ impl VenNetwork {
         }
         self.in_flight.insert(txid, Rs485InFlight {
             bus, sender: from, starts: window.starts,
-            finishes: window.finishes, frame, contended,
+            finishes: window.finishes, frame, contended, uart: false,
         });
         Ok(window)
     }
+    /// Schedules one event per received UART character at its virtual arrival.
+    /// This is character-time LOD; no sampled electrical waveform is modeled.
+    pub fn send_rs485_uart(
+        &mut self, from: PortId, frame: Frame, fault: UartFault,
+    ) -> Result<Rs485TransmissionWindow, VenError> {
+        let (bus, _) = self.topology.bus_for_port(from).ok_or(VenError::MissingBus)?;
+        let medium = self.buses.get(&bus).ok_or(VenError::MissingBus)?;
+        let bytes = frame.bytes;
+        if let UartFault::GapAfter { index, .. }
+            | UartFault::CorruptByte { index, .. }
+            | UartFault::DropByte { index } = fault
+        {
+            if index >= bytes.len() { return Err(VenError::InvalidUartFault); }
+        }
+        if self.in_flight.values().any(|tx| tx.bus == bus && tx.sender == from && tx.finishes > self.now) {
+            return Err(VenError::TransmitterBusy);
+        }
+        let mut window = medium.transmission(bytes.len(), self.now).map_err(VenError::Rs485)?;
+        let extra = match fault { UartFault::GapAfter { silence, .. } => silence, _ => SimDuration::ZERO };
+        window.finishes = window.finishes.checked_add(extra).ok_or(VenError::Rs485(Rs485Error::TimeOverflow))?;
+        window.arrives = window.arrives.checked_add(extra).ok_or(VenError::Rs485(Rs485Error::TimeOverflow))?;
+        let txid = self.next_transmission_id;
+        let next_id = txid.checked_add(1).ok_or(VenError::TransmissionIdExhausted)?;
+        // Stage the whole schedule before committing the transmission; no
+        // partially registered character stream if an insertion fails.
+        let mut pending = self.scheduler.clone();
+        for (index, original) in bytes.iter().copied().enumerate() {
+            let drop = matches!(fault, UartFault::DropByte { index: target } if target == index);
+            if drop { continue; }
+            let byte = match fault {
+                UartFault::CorruptByte { index: target, xor_mask } if target == index => original ^ xor_mask,
+                _ => original,
+            };
+            let mut when = medium.character_arrival(index + 1, self.now).map_err(VenError::Rs485)?;
+            if let UartFault::GapAfter { index: target, silence } = fault {
+                if index > target {
+                    when = when.checked_add(silence).ok_or(VenError::Rs485(Rs485Error::TimeOverflow))?;
+                }
+            }
+            pending.schedule_at(when, LocalEvent::Rs485Character { txid, byte })
+                .map_err(VenError::Schedule)?;
+        }
+        pending.schedule_at(window.arrives, LocalEvent::Rs485Complete(txid)).map_err(VenError::Schedule)?;
+        self.scheduler = pending;
+        self.next_transmission_id = next_id;
+        let mut contended = false;
+        for tx in self.in_flight.values_mut() {
+            if tx.bus == bus && tx.starts < window.finishes && self.now < tx.finishes {
+                tx.contended = true;
+                contended = true;
+            }
+        }
+        self.in_flight.insert(txid, Rs485InFlight {
+            bus, sender: from, starts: window.starts, finishes: window.finishes,
+            frame: Frame::new(bytes), contended, uart: true,
+        });
+        Ok(window)
+    }
+
 }
 
 impl SimulationParticipant for VenNetwork {
@@ -193,6 +266,23 @@ impl SimulationParticipant for VenNetwork {
                             value: NetworkOutput::Frame(arrival),
                         });
                     }
+                    LocalEvent::Rs485Character { txid, byte } => {
+                        if let Some(tx) = self.in_flight.get(&txid) {
+                            if !tx.contended {
+                                let members = &self.topology.bus(tx.bus).expect("bus exists").members;
+                                for &to in members {
+                                    if to != tx.sender {
+                                        outputs.push(TimedOutput {
+                                            at: event.at,
+                                            value: NetworkOutput::UartCharacter {
+                                                bus: tx.bus, from: tx.sender, to, byte,
+                                            },
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
                     LocalEvent::Rs485Complete(id) => {
                         // Every event was created together with its transmission.
                         let tx = self.in_flight.remove(&id).expect("scheduled transmission");
@@ -205,7 +295,7 @@ impl SimulationParticipant for VenNetwork {
                                     bus: tx.bus, sender: tx.sender,
                                 },
                             });
-                        } else {
+                        } else if !tx.uart {
                             let members = &self.topology.bus(tx.bus).expect("bus exists").members;
                             for &receiver in members {
                                 if receiver != tx.sender {

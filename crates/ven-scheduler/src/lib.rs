@@ -20,7 +20,7 @@ pub enum ScheduleError {
 
 /// Stable insertion order for events with equal timestamps is an implementation
 /// tie-breaker, NOT a model of physical simultaneity or PLC task priorities.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct NetworkScheduler<E> {
     pending: BTreeMap<(SimInstant, u64), E>,
     by_token: HashMap<EventToken, (SimInstant, u64)>,

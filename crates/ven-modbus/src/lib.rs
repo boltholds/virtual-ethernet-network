@@ -148,6 +148,21 @@ impl RtuReceiver {
 
     pub fn timing(&self) -> RtuTiming { self.timing }
 
+    pub fn next_deadline(&self) -> Option<SimInstant> {
+        match &self.state {
+            ReceiveState::Idle => None,
+            ReceiveState::Collecting { last_complete, .. }
+            | ReceiveState::Discarding { last_complete } =>
+                last_complete.checked_add(self.timing.inter_frame),
+        }
+    }
+
+    /// Bus-level corruption invalidates partial data; no Modbus exception
+    /// response is synthesized for damaged serial data.
+    pub fn invalidate(&mut self, at: SimInstant) {
+        self.state = ReceiveState::Discarding { last_complete: at };
+    }
+
     /// `at` is the end of this byte's last stop bit (receiver-local virtual time).
     /// The silence is end-to-start, NOT end-to-end between consecutive bytes.
     pub fn push_character(&mut self, byte: u8, at: SimInstant) -> Result<ReceiveEvent, RtuError> {
@@ -157,8 +172,16 @@ impl RtuReceiver {
             | ReceiveState::Discarding { last_complete } => {
                 let delta = at.checked_duration_since(*last_complete)
                     .ok_or(RtuError::TimeRegression)?;
-                delta.checked_sub(self.timing.character)
-                    .ok_or(RtuError::OverlappingCharacters)?
+                // Cumulative ceil(bit_count * 1e9 / baud) can produce adjacent
+                // character completions one nanosecond shorter than ceil(one
+                // character). This is quantization, not a physical overlap.
+                if delta < self.timing.character {
+                    let deficit = self.timing.character.as_nanos() - delta.as_nanos();
+                    if deficit > 1 { return Err(RtuError::OverlappingCharacters); }
+                    SimDuration::ZERO
+                } else {
+                    delta.checked_sub(self.timing.character).expect("nonnegative")
+                }
             }
         };
         let previous = std::mem::replace(&mut self.state, ReceiveState::Idle);
