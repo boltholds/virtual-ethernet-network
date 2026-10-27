@@ -58,6 +58,7 @@ pub enum UartFault {
 enum LocalEvent {
     Ethernet(FrameArrival),
     Rs485Complete(u64),
+    Rs485FrameArrival(u64),
     Rs485Collision { bus: BusId, first: PortId, second: PortId },
     Rs485DriverReleased { bus: BusId, sender: PortId },
     Rs485Character { txid: u64, byte: u8 },
@@ -226,6 +227,8 @@ impl VenNetwork {
 
         let mut pending = self.scheduler.clone();
         Self::add_collision_events(&mut pending, &self.in_flight, bus, from, self.now, released)?;
+        pending.schedule_at(window.arrives, LocalEvent::Rs485FrameArrival(txid))
+            .map_err(VenError::Schedule)?;
         pending.schedule_at(std::cmp::max(window.arrives, released), LocalEvent::Rs485Complete(txid))
             .map_err(VenError::Schedule)?;
         if config != Rs485Turnaround::default() {
@@ -370,6 +373,25 @@ impl SimulationParticipant for VenNetwork {
                             }
                         }
                     }
+                    LocalEvent::Rs485FrameArrival(id) => {
+                        if let Some(tx) = self.in_flight.get(&id) {
+                            if !tx.contended {
+                                let members = &self.topology.bus(tx.bus).expect("bus exists").members;
+                                for &receiver in members {
+                                    if receiver != tx.sender {
+                                        outputs.push(TimedOutput {
+                                            at: event.at,
+                                            value: NetworkOutput::Frame(FrameArrival {
+                                                from: tx.sender,
+                                                to: receiver,
+                                                frame: tx.frame.clone(),
+                                            }),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
                     LocalEvent::Rs485Complete(id) => {
                         // Every event was created together with its transmission.
                         let tx = self.in_flight.remove(&id).expect("scheduled transmission");
@@ -382,20 +404,6 @@ impl SimulationParticipant for VenNetwork {
                                     bus: tx.bus, sender: tx.sender,
                                 },
                             });
-                        } else if !tx.uart {
-                            let members = &self.topology.bus(tx.bus).expect("bus exists").members;
-                            for &receiver in members {
-                                if receiver != tx.sender {
-                                    outputs.push(TimedOutput {
-                                        at: event.at,
-                                        value: NetworkOutput::Frame(FrameArrival {
-                                            from: tx.sender,
-                                            to: receiver,
-                                            frame: tx.frame.clone(),
-                                        }),
-                                    });
-                                }
-                            }
                         }
                     }
                 }
