@@ -210,6 +210,11 @@ impl Rs485DigitalPhy {
         Ok(())
     }
 
+    pub fn bus_id(&self) -> BusId { self.bus }
+    pub fn baud_rate(&self) -> u64 { self.baud }
+    pub fn uart_format(&self) -> UartFormat { self.uart }
+    pub fn has_port(&self, port: PortId) -> bool { self.ports.contains_key(&port) }
+
     pub fn port_count(&self) -> usize { self.ports.len() }
     pub fn active_transmission_count(&self) -> usize { self.transmissions.len() }
     pub fn driver_busy_until(&self, port: PortId) -> Option<SimInstant> {
