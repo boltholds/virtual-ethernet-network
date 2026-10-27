@@ -1,5 +1,7 @@
 //! Explicit Modbus RTU protocol adapter on top of VEN's UART events.
 //! Time is owned by the calling Simulation Kernel, NOT by this adapter.
+mod causal;
+pub use causal::CausalModbusBridge;
 mod digital;
 mod host;
 pub use host::{HostError, ModbusBusHost};

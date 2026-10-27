@@ -2,6 +2,7 @@
 //! This is not yet a multi-participant conservative or optimistic orchestrator.
 
 pub mod resources;
+pub mod conservative;
 
 use sim_time::SimInstant;
 use std::fmt;
