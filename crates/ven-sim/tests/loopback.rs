@@ -93,7 +93,7 @@ fn rs485_one_sender_fans_out_to_other_nodes() {
     let targets: Vec<_> = out.outputs.iter().map(|x| {
         match &x.value {
             NetworkOutput::Frame(arrival) => arrival.to,
-            NetworkOutput::Rs485Contention { .. } | NetworkOutput::UartCharacter { .. } => panic!("unexpected event"),
+            _ => panic!("unexpected event"),
         }
     }).collect();
     assert_eq!(targets, vec![PortId(2), PortId(3)]);
@@ -104,6 +104,10 @@ fn simultaneous_rs485_drivers_report_contention_without_valid_frames() {
     let mut n = rs485_network();
     n.send_rs485(PortId(1), Frame::new(vec![1])).unwrap();
     n.send_rs485(PortId(2), Frame::new(vec![2])).unwrap();
+    let first_event = n.advance(TimeGrant { until: SimInstant::ZERO }).unwrap();
+    assert_eq!(first_event.reached, SimInstant::ZERO);
+    assert!(matches!(&first_event.outputs[0].value,
+        NetworkOutput::Rs485Collision { bus: BusId(1), first: PortId(1), second: PortId(2) }));
     let at = SimInstant::from_nanos(1_145_934);
     let out = n.advance(TimeGrant { until: at }).unwrap();
     assert_eq!(out.outputs.len(), 2);
@@ -119,6 +123,9 @@ fn staggered_overlap_invalidates_both_transmissions() {
     n.advance(TimeGrant { until: SimInstant::from_nanos(500_000) }).unwrap();
     let second = n.send_rs485(PortId(2), Frame::new(vec![2])).unwrap();
     assert_eq!(second.starts.as_nanos(), 500_000);
+    let collision = n.advance(TimeGrant { until: SimInstant::from_nanos(2_000_000) }).unwrap();
+    assert_eq!(collision.reached, SimInstant::from_nanos(500_000));
+    assert!(matches!(&collision.outputs[0].value, NetworkOutput::Rs485Collision { bus: BusId(1), .. }));
     let first_out = n.advance(TimeGrant { until: SimInstant::from_nanos(2_000_000) }).unwrap();
     assert!(matches!(&first_out.outputs[0].value, NetworkOutput::Rs485Contention { sender: PortId(1), .. }));
     let second_out = n.advance(TimeGrant { until: SimInstant::from_nanos(2_000_000) }).unwrap();
