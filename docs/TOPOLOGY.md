@@ -1,6 +1,6 @@
 # VEN topology contract
 
-`ven-topology` stores typed, physical point-to-point adjacency: nodes own ports, and links connect ports belonging to distinct nodes.
+`ven-topology` stores typed connectivity: nodes own ports; point-to-point links connect pairs of ports; RS-485 BusId objects attach multiple shared-medium ports.
 
 Invariants:
 - Node, port, and link IDs are unique within one topology.
@@ -8,8 +8,9 @@ Invariants:
 - Point-to-point endpoints must be of the same interface kind.
 - A point-to-point port may be attached to at most one link.
 - A rejected link operation leaves the topology unchanged.
-- Currently supported Ethernet runtime links are full duplex; RS-485 enum presence **does not** mean shared-bus simulation exists.
+- Ethernet runtime links are full duplex; an RS-485 BusId has two or more useful members and uses an independent shared-medium model.
+- A port cannot simultaneously be attached to a point-to-point link and a bus.
 
 `VenNetwork::connect_ethernet` validates topology before registering its physical medium. Sending a frame resolves the destination using the validated adjacency; VEN does not implement switching or automatic multi-hop forwarding yet.
 
-Planned: explicit Bus/Segment entities for multidrop RS-485, EtherCAT chains and richer Ethernet bridge/switch topologies. Avoid representing RS-485 collisions as Ethernet MAC collisions.
+Currently BusId represents logical access to a common RS-485 two-wire medium; it does **not** model spatial position along a trunk, stubs, line termination, grounding or impedance. Those must be modeled explicitly before electrical fidelity claims. Future: trunk/branch cable segments, repeaters, EtherCAT chains and richer Ethernet bridge/switch topologies.

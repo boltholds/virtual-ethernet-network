@@ -8,8 +8,9 @@ The VEN workspace contains two **reusable, VEN-independent** crates, `sim-time` 
 - `sim-kernel`: time grants, early-return results, coordinator validation, externally observable outputs.
 - `ven-core`: network port identifiers and opaque encoded frames.
 - `ven-scheduler`: local, cancellation-capable, stable ordered network-event queue.
-- `ven-medium`: elementary full-duplex point-to-point bit serialization and propagation.
-- `ven-sim`: a standalone/embeddable VEN participant binding local network events to shared time contracts.
+- `ven-medium`: elementary full-duplex point-to-point serialization; RS-485 two-wire medium with UART character timing and explicitly simplified contention.
+- `ven-topology`: physical link adjacency and multiple RS-485 ports attached to one shared BusId.
+- `ven-sim`: a standalone/embeddable VEN participant binding network events to shared time contracts; emits frame arrivals and model-level contention diagnostics.
 
 VEN **does not own global simulation time**. Its event queue is local, and the host coordinator grants a horizon. An external frame arrival makes VEN return early so other participants can observe it at the correct time.
 
@@ -22,11 +23,15 @@ VEN **does not own global simulation time**. Its event queue is local, and the h
 - The local participant returns at the earliest externally observable arrival at or before the host's time grant, emitting all arrivals at that instant.
 - Invalid links, unknown endpoints, zero rates, empty frames, and timestamp arithmetic overflow are errors.
 
+- One RS-485 transmitter starts **immediately** when requested; the medium does not auto-queue competing drivers. Every overlapping transmission on the same bus is conservatively considered undeliverable, and the simulator produces a diagnostic at transmission completion. This is an explicit frame-level policy, not a voltage-level calculation or a guarantee of collision detection by the device.
+- Byte duration on RS-485 uses configured UART start, data, parity and stop bits, not Ethernet bit counting.
+- Every successful RS-485 transmission becomes available to all *other* attached ports at frame completion plus one bus propagation delay. This is a simplified uniform-delay broadcast; no receiver-side echo, bit sampling, individual drop-cable propagation or per-device UART parsing exists.
+
 ## Explicitly not implemented
 
 - Vendor-specific PLC execution, PLC scan cycles, controller tasks.
-- Ethernet MAC, switch forwarding, shared media, collision detection, RS-485, Modbus RTU/TCP, PROFINET RT/IRT, EtherCAT.
-- Packet corruption, bit errors, jitter, queue limits, traffic shaping, physical-layer effects.
+- Ethernet MAC, switch forwarding, physical-voltage RS-485 collision resolution, Modbus RTU/TCP, PROFINET RT/IRT, EtherCAT.
+- Packet corruption/garbling, bit errors, jitter, queue limits, traffic shaping, termination/bias/impedance, cable reflections, electrical overload or transceiver damage.
 - Optimistic global rollback, cross-participant causal ordering, multi-participant time grant calculation.
 - Independent protocol conformance or fidelity certification.
 
@@ -44,6 +49,6 @@ No source code is copied or translated from GPL-licensed ns-3. ns-3 is an archit
 
 1. Prove bit serialization, propagation, independent full-duplex lanes, cancellation, and stable event order in unit tests.
 2. Add an explicit topology with interface-to-link compatibility checks.
-3. Add RS-485 half-duplex medium and Modbus RTU frame timing as a first industrial protocol vertical slice.
+3. Add RS-485 two-wire shared medium and conservative overlap detection (**implemented**); separately implement Modbus RTU frame timing, t1.5/t3.5, CRC, and master/slave exchange state (**not yet implemented**).
 4. Add Ethernet switching with bounded queues and full-duplex ports; then specialized PROFINET and EtherCAT protocol execution.
 5. Validate timing and observable behavior against documented protocol requirements and independent reference systems.

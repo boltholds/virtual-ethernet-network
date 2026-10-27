@@ -10,6 +10,9 @@ pub struct NodeId(pub u32);
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct LinkId(pub u32);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+pub struct BusId(pub u32);
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InterfaceKind {
     Ethernet,
@@ -28,11 +31,18 @@ pub struct Link {
     pub kind: InterfaceKind,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Bus {
+    pub members: BTreeSet<PortId>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TopologyError {
     DuplicateNode,
     DuplicatePort,
     DuplicateLink,
+    DuplicateBus,
+    MissingBus,
     MissingNode,
     MissingPort,
     SelfConnection,
@@ -40,6 +50,7 @@ pub enum TopologyError {
     IncompatibleInterfaces,
     PortAlreadyConnected,
     InvalidLinkKind,
+    InvalidBusKind,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -48,6 +59,8 @@ pub struct Topology {
     ports: BTreeMap<PortId, Port>,
     links: BTreeMap<LinkId, Link>,
     connected: BTreeMap<PortId, LinkId>,
+    buses: BTreeMap<BusId, Bus>,
+    bus_for_port: BTreeMap<PortId, BusId>,
 }
 
 impl Topology {
@@ -95,7 +108,8 @@ impl Topology {
         if left.kind != right.kind {
             return Err(TopologyError::IncompatibleInterfaces);
         }
-        if self.connected.contains_key(&a) || self.connected.contains_key(&b) {
+        if self.connected.contains_key(&a) || self.connected.contains_key(&b)
+            || self.bus_for_port.contains_key(&a) || self.bus_for_port.contains_key(&b) {
             return Err(TopologyError::PortAlreadyConnected);
         }
         self.links.insert(id, Link {
@@ -105,6 +119,47 @@ impl Topology {
         self.connected.insert(a, id);
         self.connected.insert(b, id);
         Ok(())
+    }
+
+
+    /// Creates a shared physical RS-485 segment; members join via attach_bus.
+    pub fn create_rs485_bus(&mut self, id: BusId) -> Result<(), TopologyError> {
+        if self.buses.contains_key(&id) {
+            return Err(TopologyError::DuplicateBus);
+        }
+        self.buses.insert(id, Bus { members: BTreeSet::new() });
+        Ok(())
+    }
+
+    /// Multidrop attachment is intentionally distinct from point-to-point links.
+    /// A port cannot be connected to multiple segments in this first slice.
+    pub fn attach_bus(&mut self, bus_id: BusId, port_id: PortId) -> Result<(), TopologyError> {
+        if !self.buses.contains_key(&bus_id) {
+            return Err(TopologyError::MissingBus);
+        }
+        let port = self.ports.get(&port_id).ok_or(TopologyError::MissingPort)?;
+        if port.kind != InterfaceKind::Rs485 {
+            return Err(TopologyError::InvalidBusKind);
+        }
+        if self.connected.contains_key(&port_id) || self.bus_for_port.contains_key(&port_id) {
+            return Err(TopologyError::PortAlreadyConnected);
+        }
+        self.buses.get_mut(&bus_id).expect("bus checked").members.insert(port_id);
+        self.bus_for_port.insert(port_id, bus_id);
+        Ok(())
+    }
+
+    pub fn bus(&self, id: BusId) -> Option<&Bus> {
+        self.buses.get(&id)
+    }
+
+    pub fn bus_for_port(&self, port_id: PortId) -> Option<(BusId, &Bus)> {
+        let id = *self.bus_for_port.get(&port_id)?;
+        Some((id, self.buses.get(&id)?))
+    }
+
+    pub fn buses(&self) -> impl Iterator<Item = (&BusId, &Bus)> {
+        self.buses.iter()
     }
 
     pub fn port(&self, id: PortId) -> Option<&Port> {
@@ -165,6 +220,36 @@ mod tests {
         assert_eq!(g.add_node(NodeId(1)), Err(TopologyError::DuplicateNode));
         assert_eq!(g.add_port(PortId(40), Port { node: NodeId(50), kind: InterfaceKind::Ethernet }), Err(TopologyError::MissingNode));
         assert_eq!(g.add_port(PortId(10), Port { node: NodeId(1), kind: InterfaceKind::Ethernet }), Err(TopologyError::DuplicatePort));
+    }
+
+
+    #[test]
+    fn rs485_bus_is_multidrop_and_attachment_is_exclusive() {
+        let mut g = topology();
+        g.add_node(NodeId(4)).unwrap();
+        g.add_port(PortId(40), Port { node: NodeId(4), kind: InterfaceKind::Rs485 }).unwrap();
+        g.create_rs485_bus(BusId(7)).unwrap();
+        assert_eq!(g.attach_bus(BusId(7), PortId(10)), Err(TopologyError::InvalidBusKind));
+        g.attach_bus(BusId(7), PortId(30)).unwrap();
+        g.attach_bus(BusId(7), PortId(40)).unwrap();
+        assert_eq!(g.bus(BusId(7)).unwrap().members.len(), 2);
+        assert_eq!(g.bus_for_port(PortId(40)).unwrap().0, BusId(7));
+        assert_eq!(g.attach_bus(BusId(7), PortId(40)), Err(TopologyError::PortAlreadyConnected));
+        assert_eq!(g.create_rs485_bus(BusId(7)), Err(TopologyError::DuplicateBus));
+    }
+
+    #[test]
+    fn point_to_point_link_cannot_reuse_bus_port() {
+        let mut g = topology();
+        g.add_node(NodeId(4)).unwrap();
+        g.add_port(PortId(40), Port { node: NodeId(4), kind: InterfaceKind::Rs485 }).unwrap();
+        g.create_rs485_bus(BusId(1)).unwrap();
+        g.attach_bus(BusId(1), PortId(30)).unwrap();
+        assert_eq!(
+            g.connect(LinkId(1), PortId(30), PortId(40)),
+            Err(TopologyError::PortAlreadyConnected)
+        );
+        assert!(g.links().next().is_none());
     }
 
     #[test]

@@ -1,3 +1,5 @@
+pub mod rs485;
+
 //! Minimal full-duplex wired medium. No collision or Ethernet MAC model yet.
 
 use sim_time::{SimDuration, SimInstant};
