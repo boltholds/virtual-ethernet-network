@@ -14,7 +14,7 @@ Primary sources:
 |---|---|---|
 | Balanced differential bus, multiple tri-state drivers and receivers | RS-485 physical | One shared BusId, driver-overlap detection; electrical characteristics not modeled |
 | Start/data/parity/stop bits, baud rate, turnaround | UART / serial configuration | Configurable bit count and baud; no DE/RE turnaround or real per-bit waveform |
-| Addressing, master/client initiated transactions, CRC16, RTU t1.5/t3.5 | Modbus serial-line protocol | **Not implemented** |
+| Addressing, master/client initiated transactions, CRC16, RTU t1.5/t3.5 | Modbus serial-line protocol | Codec, CRC and standalone character-clock receiver **implemented**; transaction state machine **not implemented** |
 | Trunk, short stubs, line terminations at two ends, common conductor, failsafe bias, unit loads | Physical installation | **Not implemented**; BusId is abstract connectivity |
 | Transmit collision | Multiple RS-485 drivers active simultaneously | Conservatively mark all overlapping transmissions **not delivered**, emit simulation-only diagnostic |
 | Auto collision detection/retry | Not guaranteed by RS-485 | **Not implemented** |
@@ -29,7 +29,7 @@ Primary sources:
 5. **Do not assume 32 devices is a universal hard limit**. RS-485 node counts depend on transceiver unit load, bias, repeaters and network design. The Modbus guide discusses 32 as a general baseline, not an immutable ceiling.
 6. **A fault involving missing termination or broken common is not necessarily a packet drop**. Impedance mismatch, reflections, bias, common-mode range and sampling must be modeled explicitly before claiming a physical outcome.
 7. **Do not equate frame-complete scheduling with bit-accurate physical simulation**. Propagation is currently one configurable constant per bus; no per-port delay, simultaneous waveform superposition, interference or cut-through behavior.
-8. **No false protocol conformance**: PROFINET and EtherCAT are still unimplemented, and Modbus RTU timing/CRC/state are still future work.
+8. **No false protocol conformance**: PROFINET and EtherCAT are still unimplemented. Modbus RTU CRC/timer/parser primitives exist, but neither a full master/slave state machine nor integrated per-character RS-485 receive simulation is implemented.
 
 ## Modeling semantics and test oracle
 
@@ -41,4 +41,4 @@ Primary sources:
 
 ## Planned next slice
 
-Modbus RTU should become a **separate protocol crate** above UART and RS-485, implementing CRC, 256-byte maximum RTU ADU, legal address range, master/slave traffic arbitration, inter-character gaps and frame boundary silence. Timing uses 3.5 and 1.5 character-times at standard rates, with the specification's recommended fixed high-rate thresholds evaluated independently. Turnaround, device timeout policies and simulated stuck-enabled transceivers should be injected as faults rather than assigned arbitrary "RS-485 defaults".
+Modbus RTU is now a **separate protocol crate** above UART/RS-485, with CRC, 256-byte ADU bound, legal address range, t1.5/t3.5 calculations and a character-timestamped receiver. Still required: character-emission integration, master/slave state machine, addressing/filtering, turnaround, device timeouts, and deliberate fault injection (e.g. stuck-enabled transceivers).

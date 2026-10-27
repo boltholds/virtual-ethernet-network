@@ -10,6 +10,7 @@ The VEN workspace contains two **reusable, VEN-independent** crates, `sim-time` 
 - `ven-scheduler`: local, cancellation-capable, stable ordered network-event queue.
 - `ven-medium`: elementary full-duplex point-to-point serialization; RS-485 two-wire medium with UART character timing and explicitly simplified contention.
 - `ven-topology`: physical link adjacency and multiple RS-485 ports attached to one shared BusId.
+- `ven-modbus`: independent Modbus RTU codec, CRC, and UART character/timing parser.
 - `ven-sim`: a standalone/embeddable VEN participant binding network events to shared time contracts; emits frame arrivals and model-level contention diagnostics.
 
 VEN **does not own global simulation time**. Its event queue is local, and the host coordinator grants a horizon. An external frame arrival makes VEN return early so other participants can observe it at the correct time.
@@ -30,8 +31,8 @@ VEN **does not own global simulation time**. Its event queue is local, and the h
 ## Explicitly not implemented
 
 - Vendor-specific PLC execution, PLC scan cycles, controller tasks.
-- Ethernet MAC, switch forwarding, physical-voltage RS-485 collision resolution, Modbus RTU/TCP, PROFINET RT/IRT, EtherCAT.
-- Packet corruption/garbling, bit errors, jitter, queue limits, traffic shaping, termination/bias/impedance, cable reflections, electrical overload or transceiver damage.
+- Ethernet MAC, switch forwarding, physical-voltage RS-485 collision resolution, Modbus master/slave state machines, Modbus TCP, PROFINET RT/IRT, EtherCAT.
+- Packet corruption/garbling, bit errors, jitter, queue limits, traffic shaping, termination/bias/impedance, cable reflections, electrical overload or transceiver damage. Modbus RTU character parser exists, but RS-485 network still emits complete frames rather than individual UART characters.
 - Optimistic global rollback, cross-participant causal ordering, multi-participant time grant calculation.
 - Independent protocol conformance or fidelity certification.
 
@@ -49,6 +50,6 @@ No source code is copied or translated from GPL-licensed ns-3. ns-3 is an archit
 
 1. Prove bit serialization, propagation, independent full-duplex lanes, cancellation, and stable event order in unit tests.
 2. Add an explicit topology with interface-to-link compatibility checks.
-3. Add RS-485 two-wire shared medium and conservative overlap detection (**implemented**); separately implement Modbus RTU frame timing, t1.5/t3.5, CRC, and master/slave exchange state (**not yet implemented**).
+3. RS-485 two-wire shared medium and overlap detection (**implemented**); Modbus RTU codec, CRC and standalone t1.5/t3.5 character parser (**implemented**); device-bound UART stream and master/slave exchange state (**not implemented**).
 4. Add Ethernet switching with bounded queues and full-duplex ports; then specialized PROFINET and EtherCAT protocol execution.
 5. Validate timing and observable behavior against documented protocol requirements and independent reference systems.
