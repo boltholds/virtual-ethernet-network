@@ -2,14 +2,14 @@
 
 ## Ownership
 
-The VEN workspace contains two **reusable, VEN-independent** crates, \`sim-time\` and \`sim-kernel\`. They define one virtual time domain and participant contracts. They are deliberately separate packages so PLC Web, Gefest integrations, and other participants can use the same primitives later. Their current home in this workspace is a bootstrap location, **not** a claim that integration into other repositories already exists.
+The VEN workspace contains two **reusable, VEN-independent** crates, `sim-time` and `sim-kernel`. They define one virtual time domain and participant contracts. They are deliberately separate packages so PLC Web, Gefest integrations, and other participants can use the same primitives later. Their current home in this workspace is a bootstrap location, **not** a claim that integration into other repositories already exists.
 
-- \`sim-time\`: integer nanosecond instants/durations; no wall-clock dependency.
-- \`sim-kernel\`: time grants, early-return results, coordinator validation, externally observable outputs.
-- \`ven-core\`: network port identifiers and opaque encoded frames.
-- \`ven-scheduler\`: local, cancellation-capable, stable ordered network-event queue.
-- \`ven-medium\`: elementary full-duplex point-to-point bit serialization and propagation.
-- \`ven-sim\`: a standalone/embeddable VEN participant binding local network events to shared time contracts.
+- `sim-time`: integer nanosecond instants/durations; no wall-clock dependency.
+- `sim-kernel`: time grants, early-return results, coordinator validation, externally observable outputs.
+- `ven-core`: network port identifiers and opaque encoded frames.
+- `ven-scheduler`: local, cancellation-capable, stable ordered network-event queue.
+- `ven-medium`: elementary full-duplex point-to-point bit serialization and propagation.
+- `ven-sim`: a standalone/embeddable VEN participant binding local network events to shared time contracts.
 
 VEN **does not own global simulation time**. Its event queue is local, and the host coordinator grants a horizon. An external frame arrival makes VEN return early so other participants can observe it at the correct time.
 
