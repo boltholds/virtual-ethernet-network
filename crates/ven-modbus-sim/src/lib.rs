@@ -1,5 +1,10 @@
 //! Explicit Modbus RTU protocol adapter on top of VEN's UART events.
 //! Time is owned by the calling Simulation Kernel, NOT by this adapter.
+mod digital;
+mod lod;
+pub use digital::DigitalModbusRtuLine;
+pub use lod::{BusLod, ModbusBus, SendTiming};
+
 use sim_kernel::{AdvanceOutcome, SimulationParticipant, TimeGrant, TimedOutput};
 use sim_time::{SimDuration, SimInstant};
 use std::collections::BTreeMap;
@@ -19,6 +24,8 @@ pub enum LineError {
     DuplicatePort,
     NotMaster,
     NotSlave,
+    DuplicateSlaveAddress,
+    Digital(ven_rs485_phy::PhyError),
 }
 
 impl fmt::Display for LineError {
@@ -32,6 +39,7 @@ pub enum LineEvent {
     Discarded { port: PortId, reason: RtuError },
     BroadcastWrite { port: PortId, register: u16, value: u16 },
     BusContention { bus: BusId, sender: PortId },
+    PhysicalReceiveError { port: PortId, sample: ven_rs485_phy::UartSample },
 }
 
 #[derive(Debug)]

@@ -13,3 +13,4 @@ ven-medium = { path = "../ven-medium" }
 ven-modbus = { path = "../ven-modbus" }
 ven-sim = { path = "../ven-sim" }
 ven-topology = { path = "../ven-topology" }
+ven-rs485-phy = { path = "../ven-rs485-phy" }
