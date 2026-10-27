@@ -111,6 +111,17 @@ impl fmt::Display for TraceError {
 }
 impl std::error::Error for TraceError {}
 
+/// Choose which point in the receive chain a measured signal represents.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObservationPoint {
+    /// Bit-center at the receiver's logical bus input (PHY reference).
+    ReceiverInput,
+    /// Bit-center shifted by a *selected* RO output propagation delay.
+    /// A datasheet typical/max value is a timing approximation, not a
+    /// calibrated waveform or a per-edge exact delay.
+    ReceiverOutput { propagation: SimDuration },
+}
+
 /// Extract expected receiver bit levels directly from the digital PHY trace.
 /// The simulator must have trace_bits=true and its reference timestamp must
 /// be the simulated DE-assert instant. Capture triggers are aligned separately.
@@ -119,6 +130,7 @@ pub fn expected_from_phy(
     from: PortId,
     to: PortId,
     simulated_trigger: SimInstant,
+    observation: ObservationPoint,
 ) -> Result<Vec<BitExpectation>, TraceError> {
     let mut expected = Vec::new();
     for event in events {
@@ -133,7 +145,12 @@ pub fn expected_from_phy(
                 LogicLevel::Low => Level::Low,
                 LogicLevel::Indeterminate => Level::Uncertain,
             };
-            expected.push(BitExpectation { after_trigger: offset, level });
+            let after_trigger = match observation {
+                ObservationPoint::ReceiverInput => offset,
+                ObservationPoint::ReceiverOutput { propagation } =>
+                    offset.checked_add(propagation).ok_or(TraceError::TimeOverflow)?,
+            };
+            expected.push(BitExpectation { after_trigger, level });
         }
     }
     Ok(expected)
@@ -321,6 +338,7 @@ mod tests {
         }
         let expected = expected_from_phy(
             &outputs, PortId(1), PortId(2), SimInstant::ZERO,
+            ObservationPoint::ReceiverInput,
         ).unwrap();
         assert_eq!(expected.len(), 11);
         // Explicitly SYNTHETIC, generated from the simulation itself:
@@ -344,6 +362,31 @@ mod tests {
             trigger, Channel::Ro, th(), SimDuration::ZERO, &expected,
         ).unwrap();
         assert!(report.all_matched(expected.len()));
+    }
+
+    #[test]
+    fn ro_delay_must_be_explicit_and_cannot_be_hidden_by_alignment() {
+        use sim_kernel::TimedOutput;
+        let event = TimedOutput {
+            at: SimInstant::from_nanos(400),
+            value: PhysicalEvent::SampledBit {
+                from: PortId(1), to: PortId(2), character: 0,
+                bit: 0, level: LogicLevel::Low,
+            },
+        };
+        let input = expected_from_phy(
+            std::slice::from_ref(&event),
+            PortId(1), PortId(2), SimInstant::from_nanos(100),
+            ObservationPoint::ReceiverInput,
+        ).unwrap();
+        let output = expected_from_phy(
+            &[event], PortId(1), PortId(2), SimInstant::from_nanos(100),
+            ObservationPoint::ReceiverOutput {
+                propagation: SimDuration::from_nanos(62),
+            },
+        ).unwrap();
+        assert_eq!(input[0].after_trigger.as_nanos(), 300);
+        assert_eq!(output[0].after_trigger.as_nanos(), 362);
     }
 
     #[test]
