@@ -24,6 +24,15 @@ pub enum Case {
     DatasheetMax,
 }
 
+/// Driver enable depends on the actual receiver-enable pin state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DriverStart {
+    /// Analog Devices: out of shutdown; TI: RE low during DE assertion.
+    ReceiverEnabled,
+    /// Analog Devices: shutdown wake; TI: RE high during DE assertion.
+    ReceiverDisabled,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ReceiverStart {
     /// Receiver stays in the active operating mode.
@@ -59,6 +68,7 @@ pub struct DatasheetProfile {
     pub document: &'static str,
     pub max_signaling_bps: u64,
     pub driver_enable_active: TimingRange,
+    pub driver_enable_from_receiver_disabled: TimingRange,
     pub driver_disable: TimingRange,
     pub receiver_enable_active: TimingRange,
     pub receiver_enable_from_shutdown: TimingRange,
@@ -84,6 +94,7 @@ impl Part {
                 document: "https://www.analog.com/media/en/technical-documentation/data-sheets/ADM3485E.pdf",
                 max_signaling_bps: 12_000_000,
                 driver_enable_active: TimingRange::new(42, 90),
+                driver_enable_from_receiver_disabled: TimingRange::new(650, 900),
                 driver_disable: TimingRange::new(35, 80),
                 receiver_enable_active: TimingRange::new(25, 50),
                 receiver_enable_from_shutdown: TimingRange::new(720, 1400),
@@ -97,6 +108,7 @@ impl Part {
                 document: "https://www.ti.com/lit/ds/symlink/thvd1451.pdf",
                 max_signaling_bps: 50_000_000,
                 driver_enable_active: TimingRange::new(20, 50),
+                driver_enable_from_receiver_disabled: TimingRange::new(2_500, 10_000),
                 driver_disable: TimingRange::new(15, 25),
                 receiver_enable_active: TimingRange::new(50, 110),
                 receiver_enable_from_shutdown: TimingRange::new(4000, 14000),
@@ -134,12 +146,17 @@ impl DatasheetProfile {
         self,
         baud: u64,
         choice: Case,
+        driver_start: DriverStart,
         receiver_start: ReceiverStart,
         controller: ControllerTiming,
     ) -> Result<TransceiverProfile, ProfileError> {
         if baud == 0 || baud > self.max_signaling_bps {
             return Err(ProfileError::BaudExceedsDatasheet);
         }
+        let tx_enable = match driver_start {
+            DriverStart::ReceiverEnabled => self.driver_enable_active.select(choice),
+            DriverStart::ReceiverDisabled => self.driver_enable_from_receiver_disabled.select(choice),
+        };
         let rx = match receiver_start {
             ReceiverStart::Active => self.receiver_enable_active.select(choice),
             ReceiverStart::FromShutdown => self.receiver_enable_from_shutdown.select(choice),
@@ -151,7 +168,7 @@ impl DatasheetProfile {
             .checked_add(rx).ok_or(ProfileError::DurationOverflow)?;
         Ok(TransceiverProfile {
             turnaround: Rs485Turnaround {
-                driver_enable: self.driver_enable_active.select(choice),
+                driver_enable: tx_enable,
                 driver_release: de_hold,
                 receiver_enable: rx_delay,
             },
@@ -172,13 +189,14 @@ mod tests {
         assert_eq!(adi.driver_enable_active, TimingRange::new(42, 90));
         assert_eq!(ti.driver_enable_active, TimingRange::new(20, 50));
         assert_eq!(ti.receiver_enable_from_shutdown.maximum_ns, 14_000);
+        assert_eq!(ti.driver_enable_from_receiver_disabled.maximum_ns, 10_000);
     }
 
     #[test]
     fn effective_guards_include_firmware_and_device_bounds() {
         let bound = Part::Adm3485e.datasheet()
             .plan_digital_guard(
-                9600, Case::DatasheetMax, ReceiverStart::Active,
+                9600, Case::DatasheetMax, DriverStart::ReceiverEnabled, ReceiverStart::Active,
                 ControllerTiming {
                     de_hold: SimDuration::from_nanos(100),
                     rx_reenable_hold: SimDuration::from_nanos(200),
@@ -190,20 +208,38 @@ mod tests {
     }
 
     #[test]
+    fn active_receiver_and_disabled_receiver_driver_start_are_distinct() {
+        let ti = Part::Thvd1450.datasheet();
+        let fast = ti.plan_digital_guard(
+            9600, Case::DatasheetMax,
+            DriverStart::ReceiverEnabled, ReceiverStart::Active,
+            ControllerTiming::default(),
+        ).unwrap();
+        let slow = ti.plan_digital_guard(
+            9600, Case::DatasheetMax,
+            DriverStart::ReceiverDisabled, ReceiverStart::FromShutdown,
+            ControllerTiming::default(),
+        ).unwrap();
+        assert_eq!(fast.turnaround.driver_enable.as_nanos(), 50);
+        assert_eq!(slow.turnaround.driver_enable.as_nanos(), 10_000);
+    }
+
+    #[test]
     fn shutdown_mode_is_not_conflated_with_active_receiver() {
         let part = Part::Thvd1450.datasheet();
         let active = part.plan_digital_guard(
-            115_200, Case::DatasheetMax, ReceiverStart::Active,
+            115_200, Case::DatasheetMax, DriverStart::ReceiverEnabled, ReceiverStart::Active,
             ControllerTiming::default(),
         ).unwrap();
         let wake = part.plan_digital_guard(
-            115_200, Case::DatasheetMax, ReceiverStart::FromShutdown,
+            115_200, Case::DatasheetMax, DriverStart::ReceiverDisabled, ReceiverStart::FromShutdown,
             ControllerTiming::default(),
         ).unwrap();
         assert_eq!(active.turnaround.receiver_enable.as_nanos(), 110);
         assert_eq!(wake.turnaround.receiver_enable.as_nanos(), 14_000);
+        assert_eq!(wake.turnaround.driver_enable.as_nanos(), 10_000);
         assert_eq!(part.plan_digital_guard(
-            60_000_000, Case::Typical, ReceiverStart::Active,
+            60_000_000, Case::Typical, DriverStart::ReceiverEnabled, ReceiverStart::Active,
             ControllerTiming::default(),
         ), Err(ProfileError::BaudExceedsDatasheet));
     }
