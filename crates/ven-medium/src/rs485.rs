@@ -41,6 +41,14 @@ impl UartFormat {
     }
 }
 
+/// Explicit per-port RS-485 direction-switching delays (not Modbus timings).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct Rs485Turnaround {
+    pub driver_enable: SimDuration,
+    pub driver_release: SimDuration,
+    pub receiver_enable: SimDuration,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Rs485TransmissionWindow {
     pub starts: SimInstant,
@@ -78,6 +86,18 @@ impl Rs485Medium {
         now.checked_add(SimDuration::from_nanos(ns))
             .and_then(|time| time.checked_add(self.propagation))
             .ok_or(Rs485Error::TimeOverflow)
+    }
+
+    /// Enable driver at `now`; start data after driver_enable; release
+    /// following the final stop bit; re-enable RX after receiver_enable.
+    pub fn with_turnaround(
+        &self, bytes: usize, now: SimInstant, delay: Rs485Turnaround,
+    ) -> Result<(Rs485TransmissionWindow, SimInstant, SimInstant), Rs485Error> {
+        let starts = now.checked_add(delay.driver_enable).ok_or(Rs485Error::TimeOverflow)?;
+        let tx = self.transmission(bytes, starts)?;
+        let released = tx.finishes.checked_add(delay.driver_release).ok_or(Rs485Error::TimeOverflow)?;
+        let ready = released.checked_add(delay.receiver_enable).ok_or(Rs485Error::TimeOverflow)?;
+        Ok((tx, released, ready))
     }
 
     /// Models one uninterrupted UART character stream starting NOW. No bus
