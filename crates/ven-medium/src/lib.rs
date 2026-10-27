@@ -1,6 +1,6 @@
-pub mod rs485;
+//! Wired media: a point-to-point full-duplex link and an RS-485 shared bus.
 
-//! Minimal full-duplex wired medium. No collision or Ethernet MAC model yet.
+pub mod rs485;
 
 use sim_time::{SimDuration, SimInstant};
 use ven_core::PortId;
