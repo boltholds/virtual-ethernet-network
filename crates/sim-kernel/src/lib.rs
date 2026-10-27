@@ -1,6 +1,8 @@
 //! Minimal reusable simulation participant/time grant contract.
 //! This is not yet a multi-participant conservative or optimistic orchestrator.
 
+pub mod resources;
+
 use sim_time::SimInstant;
 use std::fmt;
 

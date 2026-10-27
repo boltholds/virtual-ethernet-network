@@ -41,6 +41,16 @@ impl ModbusBus {
         DigitalModbusRtuLine::new(phy).map(Self::DigitalBits)
     }
 
+    /// Every bus whose events can be produced by this participant.
+    /// CharacterTimed VEN may own multiple RS-485 buses; DigitalBits owns one.
+    pub fn claimed_buses(&self) -> Vec<ven_topology::BusId> {
+        match self {
+            Self::CharacterTimed(line) =>
+                line.network().topology().buses().map(|(id, _)| *id).collect(),
+            Self::DigitalBits(line) => vec![line.phy().bus_id()],
+        }
+    }
+
     pub fn lod(&self) -> BusLod {
         match self {
             Self::CharacterTimed(_) => BusLod::CharacterTimed,

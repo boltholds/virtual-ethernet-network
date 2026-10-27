@@ -1,6 +1,8 @@
 //! Explicit Modbus RTU protocol adapter on top of VEN's UART events.
 //! Time is owned by the calling Simulation Kernel, NOT by this adapter.
 mod digital;
+mod host;
+pub use host::{HostError, ModbusBusHost};
 mod lod;
 pub use digital::DigitalModbusRtuLine;
 pub use lod::{BusLod, ModbusBus, SendTiming};
