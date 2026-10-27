@@ -45,13 +45,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         geometry: ValveGeometry::Unbound,
     })?;
     let mut host = ConservativeCoordinator::<IoMessage, u64>::new();
-    host.register(ParticipantId(1), Claims::NoExclusiveResources, Box::new(plc))?;
-    host.register(ParticipantId(2), Claims::NoExclusiveResources, Box::new(valve))?;
+    host.register(ParticipantId(1), Claims::NoExclusiveResources, Box::new(plc))
+        .map_err(|e| std::io::Error::other(format!("{e:?}")))?;
+    host.register(ParticipantId(2), Claims::NoExclusiveResources, Box::new(valve))
+        .map_err(|e| std::io::Error::other(format!("{e:?}")))?;
     host.inject_now(ParticipantId(1), ParticipantId(0),
         IoMessage::PlcInput {
             key: key("open_request.q"), value: SignalValue::Bool(true),
-        })?;
-    let result = host.advance_to(SimInstant::from_nanos(350_000_000))?;
+        }).map_err(|e| std::io::Error::other(format!("{e:?}")))?;
+    let result = host.advance_to(SimInstant::from_nanos(350_000_000))
+        .map_err(|e| std::io::Error::other(format!("{e:?}")))?;
     println!("reached {} ns; {} routed events",
         result.reached.as_nanos(), result.deliveries.len());
     for receipt in &result.deliveries {
