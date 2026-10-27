@@ -29,7 +29,7 @@ Primary sources:
 5. **Do not assume 32 devices is a universal hard limit**. RS-485 node counts depend on transceiver unit load, bias, repeaters and network design. The Modbus guide discusses 32 as a general baseline, not an immutable ceiling.
 6. **A fault involving missing termination or broken common is not necessarily a packet drop**. Impedance mismatch, reflections, bias, common-mode range and sampling must be modeled explicitly before claiming a physical outcome.
 7. **Do not equate sampled UART bits with electrical waveform accuracy**. The digital PHY resolves multiple drivers to Indeterminate and models one uniform propagation delay per bus. It does not calculate voltage, line reflections, receiver threshold hysteresis, analog rise/fall times or cable-specific faults.
-8. **No false protocol conformance**: PROFINET and EtherCAT are still unimplemented. Modbus RTU 0x03/0x06 Master/Slave is an engineering subset; there is no independently confirmed full protocol conformance, nor a production integration between Modbus and the new digital PHY.
+8. **No false protocol conformance**: PROFINET and EtherCAT are still unimplemented. Modbus RTU 0x03/0x06 Master/Slave is an engineering subset; there is no independently confirmed full protocol conformance, and no independently confirmed physical calibration. A **digital bit-sampled Modbus integration** now exists as a tested engineering subset.
 
 ## Modeling semantics and test oracle
 
@@ -41,7 +41,7 @@ Primary sources:
 
 ## Planned next slice
 
-Wire the opt-in `ven-rs485-phy` into a shared bus-LOD selection API and the already-existing Modbus RTU adapter while preserving one global virtual-time authority and preventing duplicate frame delivery. Validate timing, receiver error classification and per-model assumptions against transceiver datasheets or hardware traces. A deterministic `SampleFault::Flip` or `ForceIndeterminate` is an explicit scenario fault, not a computed probability of bit corruption.
+The opt-in `ven-rs485-phy` is now integrated through `ven-modbus-sim::ModbusBus`, which selects exactly one transport implementation per instance and uses shared time and Modbus state logic. Still required: reject duplicate BusId ownership **between** separately registered global participants; validate per-device timing and bit-error classifications against real hardware captures. A runnable canonical-CSV comparison tool and measurement protocol have been added, but no actual scope data has been provided. A deterministic `SampleFault::Flip` or `ForceIndeterminate` is an explicit scenario fault, not a computed probability of bit corruption.
 
 ## DE/RE timing basis
 
@@ -50,3 +50,9 @@ Per-port turnaround is a configurable engineering parameter, not a universal RS-
 ## New manufacturer timing metadata and oscilloscope comparison
 
 The digital PHY now includes separate manufacturer spec metadata (ADM3485E Rev D and THVD1450 SLLSEY3E Rev E) and a synthetic-tested canonical CSV waveform comparison API. The selected datasheet times represent different pin transition phenomena and test configurations, **not directly equivalent physical line propagation or UART receiver delays**. The guard planner provides *effective delays for a simulation scenario*, not automatically calibrated physical profiles. No real lab oscilloscope captures have been imported; hardware validation remains pending. See [TRANSCEIVER_PROFILES.md](TRANSCEIVER_PROFILES.md).
+
+## Confirmed LOD integration boundary
+
+`ven-modbus-sim::ModbusBus` stores one of the two transport variants and exposes one `SimulationParticipant` and one set of endpoint operations. In character mode, `VenNetwork` emits UART character-completion events. In digital mode, `Rs485DigitalPhy` emits bit-sampled receiver bytes and typed parity/framing/indeterminate errors, passed into the same Modbus state-machine classes. This prevents internal duplicate frame delivery from running two transport engines in one bus object. It does **not** globally prevent separately created simulation participants from claiming the same `BusId`.
+
+The CLI comparison and capture protocol are in [CAPTURE_PROTOCOL.md](CAPTURE_PROTOCOL.md). They compare *digital logic samples* against a real or explicitly synthetic measured trace; they are not a physical electrical validation until real acquisitions and independent calibration exist.
