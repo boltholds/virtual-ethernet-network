@@ -207,9 +207,9 @@ impl SimulationParticipant for ModbusRtuLine {
                         self.deliver_receive_event(to, received, event.at, &mut outputs, &mut replies);
                     }
                 }
-                NetworkOutput::Rs485Contention { bus, sender } => {
-                    // An electrical contention is visible only as a diagnostic
-                    // at this LOD. Invalidate partial Modbus receive state.
+                NetworkOutput::Rs485Collision { bus, first, second: _ } => {
+                    // Poison partially assembled data at the FIRST overlapping
+                    // driver instant, rather than the eventual frame completion.
                     for (port, endpoint) in self.endpoints.iter_mut() {
                         if self.network.topology().bus_for_port(*port).is_some_and(|(id, _)| id == bus) {
                             endpoint.receiver_mut().invalidate(event.at);
@@ -217,8 +217,16 @@ impl SimulationParticipant for ModbusRtuLine {
                     }
                     outputs.push(TimedOutput {
                         at: event.at,
-                        value: LineEvent::BusContention { bus, sender },
+                        value: LineEvent::BusContention { bus, sender: first },
                     });
+                }
+                NetworkOutput::Rs485Contention { .. } => {
+                    // Summary at TX completion; immediate collision was already
+                    // published and receive state already invalidated.
+                }
+                NetworkOutput::Rs485DriverReleased { .. } => {
+                    // Physical-direction diagnostic; protocol timer owns its
+                    // own t3.5 silence, independent of hardware release.
                 }
                 NetworkOutput::Frame(_) => {
                     // Legacy whole-frame RS-485/Ethernet is not a source of
