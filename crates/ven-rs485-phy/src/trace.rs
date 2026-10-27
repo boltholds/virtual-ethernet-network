@@ -8,6 +8,10 @@
 //! precomputed explicitly or imported as a DIFF channel.
 
 use sim_time::{SimDuration, SimInstant};
+use sim_kernel::TimedOutput;
+use ven_core::PortId;
+use crate::{LogicLevel, PhysicalEvent};
+use std::fmt;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Channel { De, Re, Di, Ro, A, B, Diff }
@@ -98,6 +102,41 @@ pub enum TraceError {
     MissingTrigger,
     TriggerNotRising,
     TimeOverflow,
+}
+
+impl fmt::Display for TraceError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{self:?}")
+    }
+}
+impl std::error::Error for TraceError {}
+
+/// Extract expected receiver bit levels directly from the digital PHY trace.
+/// The simulator must have trace_bits=true and its reference timestamp must
+/// be the simulated DE-assert instant. Capture triggers are aligned separately.
+pub fn expected_from_phy(
+    events: &[TimedOutput<PhysicalEvent>],
+    from: PortId,
+    to: PortId,
+    simulated_trigger: SimInstant,
+) -> Result<Vec<BitExpectation>, TraceError> {
+    let mut expected = Vec::new();
+    for event in events {
+        if let PhysicalEvent::SampledBit {
+            from: actual_from, to: actual_to, level, ..
+        } = &event.value {
+            if *actual_from != from || *actual_to != to { continue; }
+            let offset = event.at.checked_duration_since(simulated_trigger)
+                .ok_or(TraceError::TimeOverflow)?;
+            let level = match level {
+                LogicLevel::High => Level::High,
+                LogicLevel::Low => Level::Low,
+                LogicLevel::Indeterminate => Level::Uncertain,
+            };
+            expected.push(BitExpectation { after_trigger: offset, level });
+        }
+    }
+    Ok(expected)
 }
 
 #[derive(Clone, Debug)]
@@ -257,6 +296,54 @@ mod tests {
         ).unwrap();
         assert_eq!(report.mismatched, 1);
         assert_eq!(report.matched, 0);
+    }
+
+    #[test]
+    fn physical_events_bridge_into_triggered_capture_compare() {
+        use sim_kernel::{SimulationParticipant, TimeGrant};
+        use ven_medium::rs485::UartFormat;
+        use ven_topology::BusId;
+        use crate::{IdleLine, Rs485DigitalPhy, TransceiverProfile};
+        let mut phy = Rs485DigitalPhy::new(
+            BusId(1), 9600, UartFormat::MODBUS_RTU_8E1,
+            SimDuration::ZERO, IdleLine::High,
+        ).unwrap();
+        phy.add_port(PortId(1), TransceiverProfile::default()).unwrap();
+        phy.add_port(PortId(2), TransceiverProfile::default()).unwrap();
+        phy.set_trace_bits(true);
+        phy.transmit(PortId(1), vec![0x55]).unwrap();
+        let horizon = SimInstant::from_nanos(2_000_000);
+        let mut outputs = Vec::new();
+        for _ in 0..100 {
+            let step = phy.advance(TimeGrant { until: horizon }).unwrap();
+            outputs.extend(step.outputs);
+            if step.reached == horizon { break; }
+        }
+        let expected = expected_from_phy(
+            &outputs, PortId(1), PortId(2), SimInstant::ZERO,
+        ).unwrap();
+        assert_eq!(expected.len(), 11);
+        // Explicitly SYNTHETIC, generated from the simulation itself:
+        // verifies data plumbing only; never interpret as bench evidence.
+        let mut synthetic = String::from(
+            "time_ns,channel,millivolts\n0,DE,0\n100,DE,3300\n"
+        );
+        for bit in &expected {
+            let mv = match bit.level {
+                Level::High => 3300,
+                Level::Low => 0,
+                Level::Uncertain => 1300,
+            };
+            synthetic.push_str(&format!(
+                "{},RO,{}\n", bit.after_trigger.as_nanos() + 100, mv,
+            ));
+        }
+        let trace = ScopeTrace::from_canonical_csv(&synthetic).unwrap();
+        let trigger = trace.trigger_rising(Channel::De, th()).unwrap();
+        let (report, _) = trace.compare_bits(
+            trigger, Channel::Ro, th(), SimDuration::ZERO, &expected,
+        ).unwrap();
+        assert!(report.all_matched(expected.len()));
     }
 
     #[test]
