@@ -86,3 +86,25 @@ fn receiver_is_deaf_until_reenabled_after_own_transmission() {
     assert!(seen_port3);
     assert!(!seen_port1);
 }
+
+#[test]
+fn opaque_frame_arrival_is_not_delayed_by_driver_release() {
+    let mut n = network();
+    n.set_rs485_turnaround(PortId(1), Rs485Turnaround {
+        driver_enable: SimDuration::ZERO,
+        driver_release: SimDuration::from_nanos(2_000_000),
+        receiver_enable: SimDuration::ZERO,
+    }).unwrap();
+    let tx = n.send_rs485(PortId(1), Frame::new(vec![0xa5])).unwrap();
+    let held_until = n.driver_busy_until(PortId(1)).unwrap();
+    assert!(held_until > tx.arrives);
+    let arrival = n.advance(TimeGrant { until: tx.arrives }).unwrap();
+    assert_eq!(arrival.reached, tx.arrives);
+    assert_eq!(arrival.outputs.iter().filter(|event| matches!(
+        event.value, NetworkOutput::Frame(_))).count(), 2);
+    assert!(!arrival.outputs.iter().any(|event| matches!(
+        event.value, NetworkOutput::Rs485DriverReleased { .. })));
+    let release = n.advance(TimeGrant { until: held_until }).unwrap();
+    assert!(release.outputs.iter().any(|event| matches!(
+        event.value, NetworkOutput::Rs485DriverReleased { sender: PortId(1), .. })));
+}
