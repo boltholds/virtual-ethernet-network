@@ -9,7 +9,7 @@ VEN is designed to run independently or as a **simulation participant** inside t
 | Crate | Responsibility |
 |---|---|
 | `sim-time` | Shared nanosecond virtual instants and durations |
-| `sim-kernel` | Shared time grants, event contracts, and an exclusive resource-ownership registry |
+| `sim-kernel` | Shared time grants, exclusive resources and a conservative multi-actor causal coordinator |
 | `ven-core` | Opaque network frames and port identifiers |
 | `ven-scheduler` | Specialized, locally ordered and cancellable network event queue |
 | `ven-medium` | Timed full-duplex links and RS-485 shared bus with UART duration and configurable DE/RE turnaround |
@@ -37,7 +37,7 @@ Currently this is **a working foundation, not a complete Ethernet/industrial pro
 
 A separate, opt-in `ven-rs485-phy` implements a slower, **bit-sampled digital** RS-485 model. It is its own `SimulationParticipant` and is now connected to `ven-modbus-sim` through a separate `DigitalModbusRtuLine` adapter. The `ModbusBus` enum selects **exactly one** transport implementation per instantiated bus. This prevents duplicate delivery within one `ModbusBus`. The new `ModbusBusHost` uses `sim-kernel::resources::ResourceRegistry<BusId>` to reject duplicate resource claims among all participants registered with that host. Global registration is not implicitly enforced on arbitrarily instantiated raw participants. Bit-center sampling detects start/data/parity/stop behavior, indeterminate shared-line contention and injected receiver-bit faults; it is **not** an analog/electrical circuit model.
 
-Next: integrate the resource-ownership contract into the future global multi-participant simulation coordinator, preserving cross-domain causality; compare predictions with **actual hardware captures** (not supplied yet); then Ethernet switching and industrial protocol executors. See [RS-485 digital PHY](docs/RS485_DIGITAL_PHY.md), [transceiver profiles](docs/TRANSCEIVER_PROFILES.md), [real capture protocol](docs/CAPTURE_PROTOCOL.md), and [bus ownership design](docs/BUS_OWNERSHIP.md) for fidelity and integration limits.
+The reusable `ConservativeCoordinator` now runs multiple owned participants at event barriers and routes zero-delay effects in deterministic microsteps. An end-to-end test connects **mock PLC logic**, Modbus over VEN and **mock equipment** in both character-timed and digital-bit LODs. The actual PLC Web runtime and Gefest CAD are **not connected yet**. Next: real PLC/plant adapters, scalable conservative lookahead, bounded queue/backpressure and actual hardware captures. See [RS-485 digital PHY](docs/RS485_DIGITAL_PHY.md), [transceiver profiles](docs/TRANSCEIVER_PROFILES.md), [real capture protocol](docs/CAPTURE_PROTOCOL.md), [bus ownership](docs/BUS_OWNERSHIP.md), and [conservative coordinator](docs/CONSERVATIVE_COORDINATOR.md) for fidelity and integration limits.
 
 Architecture, invariants and non-goals are described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). See [docs/NETWORK_RELEVANCE.md](docs/NETWORK_RELEVANCE.md) for primary-source correctness and model fidelity audit, and [docs/MODBUS_RTU.md](docs/MODBUS_RTU.md) for the implemented protocol scope.
 

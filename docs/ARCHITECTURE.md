@@ -5,14 +5,14 @@
 The VEN workspace contains two **reusable, VEN-independent** crates, `sim-time` and `sim-kernel`. They define one virtual time domain and participant contracts. They are deliberately separate packages so PLC Web, Gefest integrations, and other participants can use the same primitives later. Their current home in this workspace is a bootstrap location, **not** a claim that integration into other repositories already exists.
 
 - `sim-time`: integer nanosecond instants/durations; no wall-clock dependency.
-- `sim-kernel`: time grants, early-return results, coordinator validation, externally observable outputs and a generic session-scoped `ResourceRegistry<R>` with typed `ParticipantId` and atomic exclusive resource claims.
+- `sim-kernel`: time grants, early-return results, validator, generic session-scoped resource registry and `conservative::ConservativeCoordinator` with global time barriers, deterministic causal delivery and zero-delay microsteps.
 - `ven-core`: network port identifiers and opaque encoded frames.
 - `ven-scheduler`: local, cancellation-capable, stable ordered network-event queue.
 - `ven-medium`: elementary full-duplex point-to-point serialization; RS-485 two-wire medium with UART character timing and configurable driver-enable, driver-release, and receiver-enable durations.
 - `ven-topology`: physical link adjacency and multiple RS-485 ports attached to one shared BusId.
 - `ven-rs485-phy`: opt-in bit-sampled logical RS-485 bus with modeled TX/RX turnaround, conservative digital contention, parity/framing/uncertainty reports and deterministic receiver-side faults. Independently hosted as a `SimulationParticipant` (not yet wired into the Modbus adapter).
 - `ven-modbus`: independent Modbus RTU codec, CRC, UART character/timing parser, limited master/slave state machines for 0x03/0x06.
-- `ven-modbus-sim`: protocol adapter above VEN UART characters, t3.5 finalization and master response deadlines. The `ModbusBusHost` moves participants into one host and rejects duplicate `BusId` across its registered executors, without exposing mutable transport topology references.
+- `ven-modbus-sim`: protocol adapter above VEN UART characters, t3.5 finalization and master response deadlines. `CausalModbusBridge` adapts Modbus outputs/inputs to a domain-specific routed event type for the shared coordinator. The `ModbusBusHost` moves participants into one host and rejects duplicate `BusId` across its registered executors, without exposing mutable transport topology references.
 - `ven-sim`: a standalone/embeddable VEN participant binding network events to shared time contracts; emits frame arrivals, per-character UART events, immediate collision notifications and observable driver-release events.
 - `ven-modbus-sim::DigitalModbusRtuLine`: translates `PhysicalEvent::Character` bit-sampled bytes and parity/framing errors into the same RTU protocol states, drives slave replies, preserves shared virtual-time deadlines and prevents duplicate receive sources within one bus instance.
 
@@ -38,7 +38,7 @@ VEN **does not own global simulation time**. Its event queue is local, and the h
 - Vendor-specific PLC execution, PLC scan cycles, controller tasks.
 - Ethernet MAC, switch forwarding, physical-voltage RS-485 collision resolution, complete Modbus function support, Modbus TCP, PROFINET RT/IRT, EtherCAT.
 - **Analog** electrical contention resolution, realistic stochastic bit-error rates, jitter, queue limits, traffic shaping, termination/bias/impedance, cable reflections, DE/RE pin-waveform propagation or transceiver damage. The opt-in digital PHY supports *deterministic injected receiver-bit faults*, not computed electrical errors. Modbus RTU UART parser is connected to an opt-in character-timestamped network mode; legacy opaque-frame mode remains.
-- Optimistic global rollback, cross-participant causal ordering, multi-participant time grant calculation.
+- Optimistic global rollback, distributed execution, asynchronous external I/O scheduling and unchecked lookahead. A minimal **in-process conservative global coordinator** now enforces barriers for all registered actors using their reported next_wakeup times. Production PLC Web/Gefest actors and full lookahead contracts remain unimplemented.
 - Independent protocol conformance or fidelity certification.
 
 Do **not** label this library a compliant PROFINET, EtherCAT, Modbus, or physical Ethernet simulator.
@@ -49,13 +49,13 @@ The high-throughput network participant (`ven-sim`) retains character/frame-leve
 
 The PHY samples the logical shared level at each UART bit center. Multiple active drivers produce `Indeterminate` for digital contention rather than a fabricated deterministic voltage or CRC failure. Local failsafe assumptions only choose what the idle line means logically, not any resistor/cable model. UART decode distinguishes valid bytes, parity errors, framing errors, missing/indeterminate bits and disabled receivers. Bit faults are deterministic *receiver sample* perturbations, not hardware damage.
 
-See [RS485_DIGITAL_PHY.md](RS485_DIGITAL_PHY.md) for details, invariants, bounded per-frame scheduling and fidelity gaps; see [BUS_OWNERSHIP.md](BUS_OWNERSHIP.md) for resource claims and host constraints.
+See [RS485_DIGITAL_PHY.md](RS485_DIGITAL_PHY.md) for physical LOD, [BUS_OWNERSHIP.md](BUS_OWNERSHIP.md) for resource claims and [CONSERVATIVE_COORDINATOR.md](CONSERVATIVE_COORDINATOR.md) for causal ordering and global host limitations.
 
 ## Planned boundaries (not crates yet)
 
 Future protocol implementations should sit above the link/medium model, with shared typed transmission interfaces. A dedicated RS-485 medium should own half-duplex bus contention rather than forcing Ethernet collisions onto all links. Transport and protocol timeouts belong to protocol models and the PLC execution profiles, not a global arbitrary priority queue.
 
-The coordinator's policy for causally related same-time events and inter-participant lookahead must be specified before multiple simultaneous PLC and network executors are hosted together. Conservative execution comes first; snapshot/restore and speculative rollback are optional capabilities.
+The coordinator implements deterministic equal-time routing and strict advertised event barriers. Registered actors must report the earliest possible externally visible wakeup and must not retroactively emit within an already advanced interval. On a violated contract or failed actor operation, the coordinator becomes poisoned; restart from a reconstructed scenario is necessary because snapshot/rollback is not implemented.
 
 No source code is copied or translated from GPL-licensed ns-3. ns-3 is an architectural and differential-testing reference only.
 

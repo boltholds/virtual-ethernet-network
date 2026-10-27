@@ -1,6 +1,6 @@
 # Exclusive RS-485 BusId ownership
 
-Status: implemented session-scoped resource uniqueness, not a multi-participant global time coordinator.
+Status: implemented session-scoped resource uniqueness. A separate conservative multi-participant coordinator is now available in `sim-kernel::conservative`.
 
 ## Registry
 
@@ -33,11 +33,9 @@ returns HostError::Registry(RegistryError::ResourceOccupied { resource, owner })
 - Multi-bus claim failures do not partially mutate ownership; repeated registration is rejected.
 - Unregister drops the executor and releases claims; a later new participant may claim the keys.
 - Separate simulation sessions can legitimately use the same BusId; there is no process-global lock.
-- The generic registry is reusable by future PLC, equipment and network participants, but the current
-  host only owns ModbusBus executors and cannot enforce rules for arbitrary direct-running participants.
+- The generic registry is also used by `ConservativeCoordinator` to guard exclusive claims across heterogeneous registered actors. The specialized `ModbusBusHost` still only owns ModbusBus executors.
 - Live topology mutation or LOD switching after registration is not offered via the host.
-- A future global coordinator must require registration of ALL bus-owning participants, enforce
-  external event ordering at equal virtual timestamps and protect against bypassing registered handles.
+- The conservative coordinator owns all actors registered through its API and enforces deterministic event barriers. Unregistered actors can still run independently; a production application must make the shared coordinator its sole simulation entrypoint.
 
 ## Tests
 
