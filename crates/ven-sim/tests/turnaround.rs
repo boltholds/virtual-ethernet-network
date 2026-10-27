@@ -73,9 +73,16 @@ fn receiver_is_deaf_until_reenabled_after_own_transmission() {
     let first = n.send_rs485_uart(PortId(1), Frame::new(vec![1]), UartFault::None).unwrap();
     n.advance(TimeGrant { until: first.finishes }).unwrap();
     n.send_rs485_uart(PortId(2), Frame::new(vec![2]), UartFault::None).unwrap();
-    let out = n.advance(TimeGrant { until: SimInstant::from_nanos(10_000_000) }).unwrap();
-    assert!(out.outputs.iter().any(|x| matches!(x.value,
-        NetworkOutput::UartCharacter { to: PortId(3), .. })));
-    assert!(!out.outputs.iter().any(|x| matches!(x.value,
-        NetworkOutput::UartCharacter { to: PortId(1), .. })));
+    let mut seen_port3 = false;
+    let mut seen_port1 = false;
+    for _ in 0..10 {
+        let out = n.advance(TimeGrant { until: SimInstant::from_nanos(10_000_000) }).unwrap();
+        seen_port3 |= out.outputs.iter().any(|x| matches!(x.value,
+            NetworkOutput::UartCharacter { to: PortId(3), .. }));
+        seen_port1 |= out.outputs.iter().any(|x| matches!(x.value,
+            NetworkOutput::UartCharacter { to: PortId(1), .. }));
+        if out.reached == SimInstant::from_nanos(10_000_000) { break; }
+    }
+    assert!(seen_port3);
+    assert!(!seen_port1);
 }
