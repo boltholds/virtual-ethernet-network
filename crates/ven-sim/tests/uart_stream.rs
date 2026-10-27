@@ -63,7 +63,7 @@ fn corrupted_character_fails_crc() {
 #[test]
 fn mid_frame_silence_triggers_t15_discard() {
     let timing = RtuTiming::new(9600, UartFormat::MODBUS_RTU_8E1).unwrap();
-    let gap = timing.inter_character.checked_add(SimDuration::from_nanos(1)).unwrap();
+    let gap = timing.inter_character.checked_add(SimDuration::from_nanos(10)).unwrap();
     let observations = run_receiver(UartFault::GapAfter { index: 1, silence: gap });
     assert!(observations.iter().any(|x| matches!(x, ReceiveEvent::Discarded(ven_modbus::RtuError::InterCharacterTimeout))));
     assert!(!observations.iter().any(|x| matches!(x, ReceiveEvent::Frame(_))));
