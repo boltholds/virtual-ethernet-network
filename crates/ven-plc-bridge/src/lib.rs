@@ -64,6 +64,8 @@ fn from_json(value: &Value) -> Result<SignalValue, BridgeError> {
         Value::Number(n) => {
             if let Some(n) = n.as_i64() {
                 Ok(SignalValue::Integer(n))
+            } else if n.is_u64() {
+                Err(BridgeError::UnsupportedValue)
             } else if let Some(f) = n.as_f64() {
                 Ok(SignalValue::Real(FiniteReal::new(f)?))
             } else { Err(BridgeError::UnsupportedValue) }
@@ -135,11 +137,18 @@ impl PythonScheduledRuntime {
         self.input.write_all(b"\n")?;
         self.input.flush()?;
         let mut raw = Vec::new();
-        // Bound one reply even if a misbehaving subprocess sends unbounded text.
-        let count = self.output.by_ref()
-            .take((MAX_REPLY_BYTES + 1) as u64).read_until(b'\n', &mut raw)?;
-        if count == 0 || count > MAX_REPLY_BYTES || raw.last() != Some(&b'\n') {
-            return Err(BridgeError::InvalidProtocol);
+        // Read one reply with bounded memory; Take<Read> is not a BufRead.
+        loop {
+            let chunk = self.output.fill_buf()?;
+            if chunk.is_empty() { return Err(BridgeError::InvalidProtocol); }
+            let end = chunk.iter().position(|&c| c == b'\n');
+            let count = end.map(|pos| pos + 1).unwrap_or(chunk.len());
+            if raw.len() + count > MAX_REPLY_BYTES {
+                return Err(BridgeError::InvalidProtocol);
+            }
+            raw.extend_from_slice(&chunk[..count]);
+            self.output.consume(count);
+            if end.is_some() { break; }
         }
         let response: Value = serde_json::from_slice(&raw)?;
         if response.get("version").and_then(Value::as_u64) != Some(VERSION) {
