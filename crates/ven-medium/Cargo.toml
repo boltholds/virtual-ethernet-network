@@ -1,0 +1,10 @@
+[package]
+name = "ven-medium"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+sim-time = { path = "../sim-time" }
+ven-core = { path = "../ven-core" }

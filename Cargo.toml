@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/sim-time",
+    "crates/sim-kernel",
+    "crates/ven-core",
+    "crates/ven-scheduler",
+    "crates/ven-medium",
+    "crates/ven-sim",
+]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.76"
+version = "0.1.0"
