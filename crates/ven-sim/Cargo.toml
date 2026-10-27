@@ -11,3 +11,4 @@ sim-kernel = { path = "../sim-kernel" }
 ven-core = { path = "../ven-core" }
 ven-medium = { path = "../ven-medium" }
 ven-scheduler = { path = "../ven-scheduler" }
+ven-topology = { path = "../ven-topology" }

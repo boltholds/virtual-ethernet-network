@@ -1,0 +1,9 @@
+[package]
+name = "ven-topology"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+ven-core = { path = "../ven-core" }

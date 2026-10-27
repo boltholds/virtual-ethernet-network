@@ -1,16 +1,19 @@
 //! A VEN participant for conservative host-managed virtual time.
 
 use sim_kernel::{AdvanceOutcome, SimulationParticipant, TimeGrant, TimedOutput};
-use sim_time::SimInstant;
+use sim_time::{SimDuration, SimInstant};
+use std::collections::BTreeMap;
 use std::fmt;
 use ven_core::{Frame, FrameArrival, PortId};
 use ven_medium::{FullDuplexLink, LinkError, Transmission};
 use ven_scheduler::{NetworkScheduler, ScheduleError};
+use ven_topology::{InterfaceKind, LinkId, NodeId, Port, Topology, TopologyError};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum VenError {
     NoLink,
     PortAlreadyConnected,
+    Topology(TopologyError),
     Link(LinkError),
     Schedule(ScheduleError),
     TimeRegression,
@@ -28,7 +31,8 @@ impl std::error::Error for VenError {}
 #[derive(Debug, Default)]
 pub struct VenNetwork {
     now: SimInstant,
-    links: Vec<FullDuplexLink>,
+    topology: Topology,
+    links: BTreeMap<LinkId, FullDuplexLink>,
     scheduler: NetworkScheduler<FrameArrival>,
 }
 
@@ -37,42 +41,63 @@ impl VenNetwork {
         Self::default()
     }
 
-    pub fn add_link(&mut self, link: FullDuplexLink) -> Result<(), VenError> {
-        let (a, b) = link.endpoints();
-        if self.links.iter().any(|existing| {
-            let (x, y) = existing.endpoints();
-            x == a || x == b || y == a || y == b
-        }) {
-            return Err(VenError::PortAlreadyConnected);
+    pub fn topology(&self) -> &Topology {
+        &self.topology
+    }
+
+    pub fn add_node(&mut self, id: NodeId) -> Result<(), VenError> {
+        self.topology.add_node(id).map_err(VenError::Topology)
+    }
+
+    pub fn add_port(&mut self, id: PortId, port: Port) -> Result<(), VenError> {
+        self.topology.add_port(id, port).map_err(VenError::Topology)
+    }
+
+    /// Adds a typed point-to-point Ethernet link. Other media deliberately
+    /// require their own executors instead of reusing Ethernet timing.
+    pub fn connect_ethernet(
+        &mut self,
+        id: LinkId,
+        a: PortId,
+        b: PortId,
+        bitrate_bps: u64,
+        propagation: SimDuration,
+    ) -> Result<(), VenError> {
+        let link = FullDuplexLink::new(a, b, bitrate_bps, propagation).map_err(VenError::Link)?;
+        // Avoid modifying either inventory or runtime state on rejected links.
+        let mut candidate = self.topology.clone();
+        candidate.connect(id, a, b).map_err(VenError::Topology)?;
+        if candidate.link(id).expect("link just inserted").kind != InterfaceKind::Ethernet {
+            return Err(VenError::Topology(TopologyError::InvalidLinkKind));
         }
-        self.links.push(link);
+        self.topology = candidate;
+        self.links.insert(id, link);
         Ok(())
     }
 
-    /// Injects an already encoded frame at the participant's current virtual time.
-    /// No transport/protocol interpretation takes place here.
+    /// Injects already encoded bytes at the current virtual time.
     pub fn send(
         &mut self,
         from: PortId,
         to: PortId,
         frame: Frame,
     ) -> Result<Transmission, VenError> {
-        let link = self
-            .links
-            .iter_mut()
-            .find(|candidate| candidate.connects(from, to))
-            .ok_or(VenError::NoLink)?;
-
-        // Commit medium availability only if scheduling also succeeds.
-        let previous = link.clone();
-        let tx = link
+        let (id, link) = self.topology.link_for_port(from).ok_or(VenError::NoLink)?;
+        if !((link.endpoints.0 == from && link.endpoints.1 == to)
+            || (link.endpoints.1 == from && link.endpoints.0 == to))
+        {
+            return Err(VenError::NoLink);
+        }
+        let medium = self.links.get_mut(&id).ok_or(VenError::NoLink)?;
+        let previous = medium.clone();
+        let tx = medium
             .transmit(from, to, frame.len(), self.now)
             .map_err(VenError::Link)?;
         if let Err(error) = self.scheduler.schedule_at(
             tx.arrives,
             FrameArrival { from, to, frame },
         ) {
-            *link = previous;
+            *medium = previous;
             return Err(VenError::Schedule(error));
         }
         Ok(tx)
@@ -96,14 +121,10 @@ impl SimulationParticipant for VenNetwork {
             return Err(VenError::TimeRegression);
         }
 
-        // Return early before any frame is externally visible to another model.
         if let Some(at) = self.scheduler.next_time().filter(|t| *t <= grant.until) {
             let mut outputs = Vec::new();
             while let Some(event) = self.scheduler.pop_through(at) {
-                outputs.push(TimedOutput {
-                    at: event.at,
-                    value: event.event,
-                });
+                outputs.push(TimedOutput { at: event.at, value: event.event });
             }
             self.now = at;
             return Ok(AdvanceOutcome {
