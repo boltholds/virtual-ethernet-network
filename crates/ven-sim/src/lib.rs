@@ -341,12 +341,24 @@ impl SimulationParticipant for VenNetwork {
                             value: NetworkOutput::Frame(arrival),
                         });
                     }
+                    LocalEvent::Rs485Collision { bus, first, second } => {
+                        outputs.push(TimedOutput {
+                            at: event.at,
+                            value: NetworkOutput::Rs485Collision { bus, first, second },
+                        });
+                    }
+                    LocalEvent::Rs485DriverReleased { bus, sender } => {
+                        outputs.push(TimedOutput {
+                            at: event.at,
+                            value: NetworkOutput::Rs485DriverReleased { bus, sender },
+                        });
+                    }
                     LocalEvent::Rs485Character { txid, byte } => {
                         if let Some(tx) = self.in_flight.get(&txid) {
                             if !tx.contended {
                                 let members = &self.topology.bus(tx.bus).expect("bus exists").members;
                                 for &to in members {
-                                    if to != tx.sender {
+                                    if to != tx.sender && self.receiver_ready_at.get(&to).is_none_or(|ready| *ready <= event.at) {
                                         outputs.push(TimedOutput {
                                             at: event.at,
                                             value: NetworkOutput::UartCharacter {
