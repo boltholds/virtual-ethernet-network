@@ -7,6 +7,7 @@ members = [
     "crates/ven-topology",
     "crates/ven-scheduler",
     "crates/ven-medium",
+    "crates/ven-rs485-phy",
     "crates/ven-modbus",
     "crates/ven-modbus-sim",
     "crates/ven-sim",

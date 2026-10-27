@@ -1,0 +1,17 @@
+[package]
+name = "ven-rs485-phy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+sim-time = { path = "../sim-time" }
+sim-kernel = { path = "../sim-kernel" }
+ven-core = { path = "../ven-core" }
+ven-topology = { path = "../ven-topology" }
+ven-medium = { path = "../ven-medium" }
+ven-scheduler = { path = "../ven-scheduler" }
+
+[dev-dependencies]
+ven-modbus = { path = "../ven-modbus" }
