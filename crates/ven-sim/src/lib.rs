@@ -216,35 +216,29 @@ impl VenNetwork {
     ) -> Result<Rs485TransmissionWindow, VenError> {
         let (bus, _) = self.topology.bus_for_port(from).ok_or(VenError::MissingBus)?;
         let medium = self.buses.get(&bus).ok_or(VenError::MissingBus)?;
-        let window = medium.transmission(frame.len(), self.now).map_err(VenError::Rs485)?;
-
-        if self.in_flight.values().any(|tx| tx.bus == bus
-            && tx.sender == from && tx.finishes > self.now)
-        {
+        let config = self.port_config(from);
+        if self.driver_busy_until.get(&from).is_some_and(|until| *until > self.now) {
             return Err(VenError::TransmitterBusy);
         }
-
+        let (window, released, ready) = medium.with_turnaround(frame.len(), self.now, config).map_err(VenError::Rs485)?;
         let txid = self.next_transmission_id;
         let next = txid.checked_add(1).ok_or(VenError::TransmissionIdExhausted)?;
 
-        // Reserve in the queue before changing the in-flight state.
-        self.scheduler.schedule_at(window.arrives, LocalEvent::Rs485Complete(txid))
+        let mut pending = self.scheduler.clone();
+        Self::add_collision_events(&mut pending, &self.in_flight, bus, from, self.now, released)?;
+        pending.schedule_at(std::cmp::max(window.arrives, released), LocalEvent::Rs485Complete(txid))
             .map_err(VenError::Schedule)?;
-        self.next_transmission_id = next;
-
-        let mut contended = false;
-        for existing in self.in_flight.values_mut() {
-            if existing.bus == bus
-                && existing.starts < window.finishes
-                && self.now < existing.finishes
-            {
-                existing.contended = true;
-                contended = true;
-            }
+        if config != Rs485Turnaround::default() {
+            pending.schedule_at(released, LocalEvent::Rs485DriverReleased { bus, sender: from })
+                .map_err(VenError::Schedule)?;
         }
+        self.scheduler = pending;
+        self.next_transmission_id = next;
+        let contended = self.mark_contentions(bus, self.now, released);
+        self.commit_port_turnaround(from, released, ready);
         self.in_flight.insert(txid, Rs485InFlight {
-            bus, sender: from, starts: window.starts,
-            finishes: window.finishes, frame, contended, uart: false,
+            bus, sender: from, starts: self.now, finishes: window.finishes, released_at: released,
+            frame, contended, uart: false,
         });
         Ok(window)
     }
