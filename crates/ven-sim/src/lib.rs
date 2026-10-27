@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use ven_core::{Frame, FrameArrival, PortId};
 use ven_medium::{FullDuplexLink, LinkError, Transmission};
-use ven_medium::rs485::{Rs485Error, Rs485Medium, Rs485TransmissionWindow, UartFormat};
+use ven_medium::rs485::{Rs485Error, Rs485Medium, Rs485TransmissionWindow, Rs485Turnaround, UartFormat};
 use ven_scheduler::{NetworkScheduler, ScheduleError};
 use ven_topology::{BusId, InterfaceKind, LinkId, NodeId, Port, Topology, TopologyError};
 
@@ -16,6 +16,7 @@ pub enum VenError {
     MissingBus,
     TransmitterBusy,
     InvalidUartFault,
+    PortTurnaroundBusy,
     TransmissionIdExhausted,
     Topology(TopologyError),
     Link(LinkError),
@@ -37,6 +38,9 @@ impl std::error::Error for VenError {}
 pub enum NetworkOutput {
     Frame(FrameArrival),
     Rs485Contention { bus: BusId, sender: PortId },
+    /// Report a conflict at the exact virtual time a second driver becomes active.
+    Rs485Collision { bus: BusId, first: PortId, second: PortId },
+    Rs485DriverReleased { bus: BusId, sender: PortId },
     UartCharacter { bus: BusId, from: PortId, to: PortId, byte: u8 },
 }
 
@@ -54,6 +58,8 @@ pub enum UartFault {
 enum LocalEvent {
     Ethernet(FrameArrival),
     Rs485Complete(u64),
+    Rs485Collision { bus: BusId, first: PortId, second: PortId },
+    Rs485DriverReleased { bus: BusId, sender: PortId },
     Rs485Character { txid: u64, byte: u8 },
 }
 
@@ -63,6 +69,7 @@ struct Rs485InFlight {
     sender: PortId,
     starts: SimInstant,
     finishes: SimInstant,
+    released_at: SimInstant,
     frame: Frame,
     contended: bool,
     uart: bool,
@@ -75,6 +82,9 @@ pub struct VenNetwork {
     topology: Topology,
     links: BTreeMap<LinkId, FullDuplexLink>,
     buses: BTreeMap<BusId, Rs485Medium>,
+    turnaround: BTreeMap<PortId, Rs485Turnaround>,
+    driver_busy_until: BTreeMap<PortId, SimInstant>,
+    receiver_ready_at: BTreeMap<PortId, SimInstant>,
     in_flight: BTreeMap<u64, Rs485InFlight>,
     next_transmission_id: u64,
     scheduler: NetworkScheduler<LocalEvent>,
@@ -121,6 +131,59 @@ impl VenNetwork {
 
     pub fn attach_rs485_port(&mut self, bus: BusId, port: PortId) -> Result<(), VenError> {
         self.topology.attach_bus(bus, port).map_err(VenError::Topology)
+    }
+
+    /// Port-specific DE/RE delays. Defaults to zero, never inferred from baud.
+    pub fn set_rs485_turnaround(&mut self, port: PortId, config: Rs485Turnaround) -> Result<(), VenError> {
+        if self.topology.bus_for_port(port).is_none() { return Err(VenError::MissingBus); }
+        if self.driver_busy_until.get(&port).is_some_and(|until| *until > self.now) {
+            return Err(VenError::PortTurnaroundBusy);
+        }
+        self.turnaround.insert(port, config);
+        Ok(())
+    }
+
+    pub fn driver_busy_until(&self, port: PortId) -> Option<SimInstant> {
+        self.driver_busy_until.get(&port).copied()
+    }
+
+    pub fn receiver_ready_at(&self, port: PortId) -> Option<SimInstant> {
+        self.receiver_ready_at.get(&port).copied()
+    }
+
+    fn port_config(&self, port: PortId) -> Rs485Turnaround {
+        self.turnaround.get(&port).copied().unwrap_or_default()
+    }
+
+    fn add_collision_events(
+        queue: &mut NetworkScheduler<LocalEvent>,
+        active: &BTreeMap<u64, Rs485InFlight>,
+        bus: BusId, sender: PortId, now: SimInstant, released: SimInstant,
+    ) -> Result<(), VenError> {
+        for tx in active.values() {
+            if tx.bus == bus && tx.starts < released && now < tx.released_at {
+                queue.schedule_at(now, LocalEvent::Rs485Collision {
+                    bus, first: tx.sender, second: sender,
+                }).map_err(VenError::Schedule)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn mark_contentions(&mut self, bus: BusId, starts: SimInstant, released: SimInstant) -> bool {
+        let mut contended = false;
+        for tx in self.in_flight.values_mut() {
+            if tx.bus == bus && tx.starts < released && starts < tx.released_at {
+                tx.contended = true;
+                contended = true;
+            }
+        }
+        contended
+    }
+
+    fn commit_port_turnaround(&mut self, port: PortId, released: SimInstant, ready: SimInstant) {
+        self.driver_busy_until.insert(port, released);
+        self.receiver_ready_at.insert(port, ready);
     }
 
     /// Transmit an opaque frame directly to a wired Ethernet link neighbor.
