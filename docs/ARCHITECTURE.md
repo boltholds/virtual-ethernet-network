@@ -10,10 +10,11 @@ The VEN workspace contains two **reusable, VEN-independent** crates, `sim-time` 
 - `ven-scheduler`: local, cancellation-capable, stable ordered network-event queue.
 - `ven-medium`: elementary full-duplex point-to-point serialization; RS-485 two-wire medium with UART character timing and configurable driver-enable, driver-release, and receiver-enable durations.
 - `ven-topology`: physical link adjacency and multiple RS-485 ports attached to one shared BusId.
-- `ven-rs485-phy`: opt-in bit-sampled logical RS-485 bus with modeled TX/RX turnaround, conservative digital contention, parity/framing/uncertainty reports and deterministic receiver-side faults. Independently hosted as a `SimulationParticipant` (not yet wired into the Modbus adapter).
+- `ven-rs485-phy`: opt-in bit-sampled logical RS-485 bus with modeled TX/RX turnaround, conservative digital contention, parity/framing/uncertainty reports and deterministic receiver-side faults. Its `DigitalModbusRtuLine` adapter is implemented and available.
 - `ven-modbus`: independent Modbus RTU codec, CRC, UART character/timing parser, limited master/slave state machines for 0x03/0x06.
 - `ven-modbus-sim`: protocol adapter above VEN UART characters, t3.5 finalization and master response deadlines. `CausalModbusBridge` adapts Modbus outputs/inputs to a domain-specific routed event type for the shared coordinator. The `ModbusBusHost` moves participants into one host and rejects duplicate `BusId` across its registered executors, without exposing mutable transport topology references.
 - `ven-sim`: a standalone/embeddable VEN participant binding network events to shared time contracts; emits frame arrivals, per-character UART events, immediate collision notifications and observable driver-release events.
+- `ven-plc-bridge`: opt-in persistent Python `ScheduledRuntime` JSONL subprocess adapter; typed PLC input/output messages and a deterministic first-pass discrete valve process model with explicit faults. It implements `CausalParticipant`, not a new global clock or an inferred Gefest/RustSolid dynamics solver.
 - `ven-modbus-sim::DigitalModbusRtuLine`: translates `PhysicalEvent::Character` bit-sampled bytes and parity/framing errors into the same RTU protocol states, drives slave replies, preserves shared virtual-time deadlines and prevents duplicate receive sources within one bus instance.
 
 VEN **does not own global simulation time**. Its event queue is local, and the host coordinator grants a horizon. An external frame arrival makes VEN return early so other participants can observe it at the correct time.
@@ -49,7 +50,7 @@ The high-throughput network participant (`ven-sim`) retains character/frame-leve
 
 The PHY samples the logical shared level at each UART bit center. Multiple active drivers produce `Indeterminate` for digital contention rather than a fabricated deterministic voltage or CRC failure. Local failsafe assumptions only choose what the idle line means logically, not any resistor/cable model. UART decode distinguishes valid bytes, parity errors, framing errors, missing/indeterminate bits and disabled receivers. Bit faults are deterministic *receiver sample* perturbations, not hardware damage.
 
-See [RS485_DIGITAL_PHY.md](RS485_DIGITAL_PHY.md) for physical LOD, [BUS_OWNERSHIP.md](BUS_OWNERSHIP.md) for resource claims and [CONSERVATIVE_COORDINATOR.md](CONSERVATIVE_COORDINATOR.md) for causal ordering and global host limitations.
+See [RS485_DIGITAL_PHY.md](RS485_DIGITAL_PHY.md) for physical LOD, [BUS_OWNERSHIP.md](BUS_OWNERSHIP.md) for resource claims, [CONSERVATIVE_COORDINATOR.md](CONSERVATIVE_COORDINATOR.md) for causal ordering, and [PLC_PYTHON_RUNTIME_BRIDGE.md](PLC_PYTHON_RUNTIME_BRIDGE.md) for the cross-process pilot and limitations.
 
 ## Planned boundaries (not crates yet)
 
