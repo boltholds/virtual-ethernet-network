@@ -42,6 +42,13 @@ pub enum UartSample {
     ReceiverDisabled,
 }
 
+/// Deterministic fault at a single receiver bit-sampling instant.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SampleFault {
+    Flip,
+    ForceIndeterminate,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PhysicalEvent {
     /// Digital contention diagnostic; physical devices are not assumed to detect this.
@@ -71,6 +78,7 @@ pub enum PhyError {
     InvalidUartFormat,
     EmptyFrame,
     TooManyBytes,
+    InvalidBitFault,
     TransmitterBusy,
     TimeOverflow,
     TimeRegression,
@@ -147,6 +155,7 @@ pub struct Rs485DigitalPhy {
     receiver_ready_at: BTreeMap<PortId, SimInstant>,
     transmissions: BTreeMap<u64, Transmission>,
     samples: BTreeMap<(u64, PortId, usize), Vec<BitReading>>,
+    bit_faults: BTreeMap<(PortId, usize, usize), SampleFault>,
     next_txid: u64,
     events: NetworkScheduler<LocalEvent>,
     trace_bits: bool,
@@ -173,6 +182,7 @@ impl Rs485DigitalPhy {
             transmissions: BTreeMap::new(),
             samples: BTreeMap::new(), next_txid: 0,
             events: NetworkScheduler::new(), trace_bits: false,
+            bit_faults: BTreeMap::new(),
         })
     }
 
@@ -184,6 +194,17 @@ impl Rs485DigitalPhy {
 
     pub fn set_trace_bits(&mut self, enabled: bool) {
         self.trace_bits = enabled;
+    }
+
+    /// Inject a one-shot *receiver sampling fault*, not a voltage/waveform model.
+    /// Triggered at the next matching (port, character index, bit index).
+    pub fn inject_sample_fault(
+        &mut self, receiver: PortId, character: usize, bit: usize, fault: SampleFault,
+    ) -> Result<(), PhyError> {
+        if !self.ports.contains_key(&receiver) { return Err(PhyError::UnknownPort); }
+        if bit >= self.bits_per_char { return Err(PhyError::InvalidBitFault); }
+        self.bit_faults.insert((receiver, character, bit), fault);
+        Ok(())
     }
 
     pub fn port_count(&self) -> usize { self.ports.len() }
@@ -394,13 +415,24 @@ impl SimulationParticipant for Rs485DigitalPhy {
                     let sender = self.transmissions.get(&txid).expect("transmission retained").sender;
                     let muted = self.receiver_ready_at.get(&to)
                         .is_some_and(|&ready| event.at < ready);
-                    let level = if muted {
+                    let mut level = if muted {
                         BitReading::Muted
                     } else {
                         let wire_at = event.at.checked_sub_duration(self.propagation)
                             .ok_or(PhyError::TimeRegression)?;
                         BitReading::Level(self.observe_wire(wire_at))
                     };
+                    if let Some(fault) = self.bit_faults.remove(&(to, character, bit)) {
+                        level = match (level, fault) {
+                            (BitReading::Level(LogicLevel::High), SampleFault::Flip) =>
+                                BitReading::Level(LogicLevel::Low),
+                            (BitReading::Level(LogicLevel::Low), SampleFault::Flip) =>
+                                BitReading::Level(LogicLevel::High),
+                            (BitReading::Level(_), SampleFault::ForceIndeterminate) =>
+                                BitReading::Level(LogicLevel::Indeterminate),
+                            (original, _) => original,
+                        };
+                    }
                     if self.trace_bits {
                         outputs.push(TimedOutput {
                             at: event.at,
