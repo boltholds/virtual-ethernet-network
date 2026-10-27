@@ -16,8 +16,8 @@ Primary sources:
 | Start/data/parity/stop bits, baud rate, turnaround | UART / serial configuration | Configurable bit count and baud; no DE/RE turnaround or real per-bit waveform |
 | Addressing, master/client initiated transactions, CRC16, RTU t1.5/t3.5 | Modbus serial-line protocol | Codec, CRC and standalone character-clock receiver **implemented**; transaction state machine **not implemented** |
 | Trunk, short stubs, line terminations at two ends, common conductor, failsafe bias, unit loads | Physical installation | **Not implemented**; BusId is abstract connectivity |
-| Transmit collision | Multiple RS-485 drivers active simultaneously | Conservatively mark all overlapping transmissions **not delivered**, emit simulation-only diagnostic |
-| Auto collision detection/retry | Not guaranteed by RS-485 | **Not implemented** |
+| Transmit collision | Multiple RS-485 drivers active simultaneously | Emit an immediate model-level collision when the second modeled driver is enabled; suppress remaining contended data, and issue later completion summaries |
+| Auto collision detection/retry | Not guaranteed by RS-485 | No hardware collision detector or automatic retry; collision output is only a simulation diagnostic |
 | Ethernet switch output queues / full duplex | Ethernet | Separate wired model; absolutely no reuse of RS-485 contention semantics |
 
 ## Earlier simplifications corrected
@@ -34,11 +34,15 @@ Primary sources:
 ## Modeling semantics and test oracle
 
 - At the current byte-frame LOD, a local call to `send_rs485` asserts a simulated driver for a fixed interval `[start, finish)`.
-- A second driver starting before the first finishes contends, even if starts are staggered. An exactly adjacent start (`start == preceding finish`) is not a collision.
-- Each contended transmission produces one `NetworkOutput::Rs485Contention` diagnostic at its modeled completion+propagation instant, and zero valid receiver frames.
-- Without contention, each receiving participant (excluding sender) receives the same opaque bytes after full serialization and uniform propagation.
+- A second driver starting while the first is still enabled contends, including during the configured post-data `driver_release` hold. Without release delay, exactly adjacent starts at the previous UART finish do not collide. VEN emits the collision at overlap onset.
+- At overlap onset, VEN publishes `NetworkOutput::Rs485Collision`, and the Modbus adapter invalidates any partial RTU frame. Each affected transmission later produces a `Rs485Contention` completion summary. Previously delivered characters cannot be retracted; later characters from contended transmissions are suppressed.
+- Without contention, whole-frame mode broadcasts the opaque payload. UART mode streams characters with uniform propagation; sender's RE readiness can suppress reception after its own transmission. These modeled signals remain simpler than electrical waveforms.
 - Test results from this model do **not** certify real physical reliability, electrical safety, protocol conformity, or industrial commissioning readiness.
 
 ## Planned next slice
 
 Modbus RTU is now a **separate protocol crate** above UART/RS-485, with CRC, 256-byte ADU bound, legal address range, t1.5/t3.5 calculations and a character-timestamped receiver. Still required: character-emission integration, master/slave state machine, addressing/filtering, turnaround, device timeouts, and deliberate fault injection (e.g. stuck-enabled transceivers).
+
+## DE/RE timing basis
+
+Per-port turnaround is a configurable engineering parameter, not a universal RS-485 or Modbus timing. Driver enable/disable and receiver enable/disable are distinct transceiver timing characteristics. References: [Analog Devices AN-960](https://www.analog.com/en/resources/app-notes/an-960.html) and [TI RS-485 Half-Duplex EVM Guide](https://www.ti.com/lit/ug/sllu173c/sllu173c.pdf). Current VEN models one logical enable-settle delay, one post-data driver-release hold and one receiver-reenable delay; it does **not** reproduce voltage, bias, pin propagation edges or guaranteed electrical behavior of any named part.
