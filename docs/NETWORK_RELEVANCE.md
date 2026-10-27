@@ -12,9 +12,9 @@ Primary sources:
 
 | Concern | Standard/layer | VEN current implementation |
 |---|---|---|
-| Balanced differential bus, multiple tri-state drivers and receivers | RS-485 physical | One shared BusId, driver-overlap detection; electrical characteristics not modeled |
-| Start/data/parity/stop bits, baud rate, turnaround | UART / serial configuration | Configurable bit count and baud; no DE/RE turnaround or real per-bit waveform |
-| Addressing, master/client initiated transactions, CRC16, RTU t1.5/t3.5 | Modbus serial-line protocol | Codec, CRC and standalone character-clock receiver **implemented**; transaction state machine **not implemented** |
+| Balanced differential bus, multiple tri-state drivers and receivers | RS-485 physical | Shared BusId and driver-overlap diagnostics; optional digital PHY supports logic High/Low/Indeterminate, **not** electrical voltage or impedance |
+| Start/data/parity/stop bits, baud rate, turnaround | UART / serial configuration | DE/RE timing, character-mode events, and independent digital PHY with per-bit mid-cell sampling and UART parity/framing checks |
+| Addressing, master/client initiated transactions, CRC16, RTU t1.5/t3.5 | Modbus serial-line protocol | Separate Modbus codec, 0x03/0x06 Master/Slave and character-driven timeouts implemented; opt-in digital PHY has **not yet been integrated into Modbus adapter** |
 | Trunk, short stubs, line terminations at two ends, common conductor, failsafe bias, unit loads | Physical installation | **Not implemented**; BusId is abstract connectivity |
 | Transmit collision | Multiple RS-485 drivers active simultaneously | Emit an immediate model-level collision when the second modeled driver is enabled; suppress remaining contended data, and issue later completion summaries |
 | Auto collision detection/retry | Not guaranteed by RS-485 | No hardware collision detector or automatic retry; collision output is only a simulation diagnostic |
@@ -28,8 +28,8 @@ Primary sources:
 4. **Serial byte cost is not just eight data bits**. UART character formatting is accounted for: typical Modbus RTU 8E1 or 8N2 uses 11 line bits per 8-bit data byte.
 5. **Do not assume 32 devices is a universal hard limit**. RS-485 node counts depend on transceiver unit load, bias, repeaters and network design. The Modbus guide discusses 32 as a general baseline, not an immutable ceiling.
 6. **A fault involving missing termination or broken common is not necessarily a packet drop**. Impedance mismatch, reflections, bias, common-mode range and sampling must be modeled explicitly before claiming a physical outcome.
-7. **Do not equate frame-complete scheduling with bit-accurate physical simulation**. Propagation is currently one configurable constant per bus; no per-port delay, simultaneous waveform superposition, interference or cut-through behavior.
-8. **No false protocol conformance**: PROFINET and EtherCAT are still unimplemented. Modbus RTU CRC/timer/parser primitives exist, but neither a full master/slave state machine nor integrated per-character RS-485 receive simulation is implemented.
+7. **Do not equate sampled UART bits with electrical waveform accuracy**. The digital PHY resolves multiple drivers to Indeterminate and models one uniform propagation delay per bus. It does not calculate voltage, line reflections, receiver threshold hysteresis, analog rise/fall times or cable-specific faults.
+8. **No false protocol conformance**: PROFINET and EtherCAT are still unimplemented. Modbus RTU 0x03/0x06 Master/Slave is an engineering subset; there is no independently confirmed full protocol conformance, nor a production integration between Modbus and the new digital PHY.
 
 ## Modeling semantics and test oracle
 
@@ -41,7 +41,7 @@ Primary sources:
 
 ## Planned next slice
 
-Modbus RTU is now a **separate protocol crate** above UART/RS-485, with CRC, 256-byte ADU bound, legal address range, t1.5/t3.5 calculations and a character-timestamped receiver. Still required: character-emission integration, master/slave state machine, addressing/filtering, turnaround, device timeouts, and deliberate fault injection (e.g. stuck-enabled transceivers).
+Wire the opt-in `ven-rs485-phy` into a shared bus-LOD selection API and the already-existing Modbus RTU adapter while preserving one global virtual-time authority and preventing duplicate frame delivery. Validate timing, receiver error classification and per-model assumptions against transceiver datasheets or hardware traces. A deterministic `SampleFault::Flip` or `ForceIndeterminate` is an explicit scenario fault, not a computed probability of bit corruption.
 
 ## DE/RE timing basis
 

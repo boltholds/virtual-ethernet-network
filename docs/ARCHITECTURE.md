@@ -10,6 +10,7 @@ The VEN workspace contains two **reusable, VEN-independent** crates, `sim-time` 
 - `ven-scheduler`: local, cancellation-capable, stable ordered network-event queue.
 - `ven-medium`: elementary full-duplex point-to-point serialization; RS-485 two-wire medium with UART character timing and configurable driver-enable, driver-release, and receiver-enable durations.
 - `ven-topology`: physical link adjacency and multiple RS-485 ports attached to one shared BusId.
+- `ven-rs485-phy`: opt-in bit-sampled logical RS-485 bus with modeled TX/RX turnaround, conservative digital contention, parity/framing/uncertainty reports and deterministic receiver-side faults. Independently hosted as a `SimulationParticipant` (not yet wired into the Modbus adapter).
 - `ven-modbus`: independent Modbus RTU codec, CRC, UART character/timing parser, limited master/slave state machines for 0x03/0x06.
 - `ven-modbus-sim`: protocol adapter above VEN UART characters, t3.5 finalization and master response deadlines.
 - `ven-sim`: a standalone/embeddable VEN participant binding network events to shared time contracts; emits frame arrivals, per-character UART events, immediate collision notifications and observable driver-release events.
@@ -35,11 +36,19 @@ VEN **does not own global simulation time**. Its event queue is local, and the h
 
 - Vendor-specific PLC execution, PLC scan cycles, controller tasks.
 - Ethernet MAC, switch forwarding, physical-voltage RS-485 collision resolution, complete Modbus function support, Modbus TCP, PROFINET RT/IRT, EtherCAT.
-- Electrical contention resolution, bit errors, jitter, queue limits, traffic shaping, termination/bias/impedance, cable reflections, DE/RE pin-waveform propagation or transceiver damage. Modbus RTU UART parser is connected to an opt-in character-timestamped network mode; legacy opaque-frame mode remains.
+- **Analog** electrical contention resolution, realistic stochastic bit-error rates, jitter, queue limits, traffic shaping, termination/bias/impedance, cable reflections, DE/RE pin-waveform propagation or transceiver damage. The opt-in digital PHY supports *deterministic injected receiver-bit faults*, not computed electrical errors. Modbus RTU UART parser is connected to an opt-in character-timestamped network mode; legacy opaque-frame mode remains.
 - Optimistic global rollback, cross-participant causal ordering, multi-participant time grant calculation.
 - Independent protocol conformance or fidelity certification.
 
 Do **not** label this library a compliant PROFINET, EtherCAT, Modbus, or physical Ethernet simulator.
+
+## Simulation levels and physical-model boundary
+
+The high-throughput network participant (`ven-sim`) retains character/frame-level RS-485 and its existing Modbus protocol adapter; `ven-rs485-phy` offers a distinct opt-in bit-level **digital** participant on the same `sim-time`/`sim-kernel` contracts. They are not yet interchangeable in the same Modbus simulation session. Never run both on the same logical bus simultaneously without an explicit LOD selection and one source of events.
+
+The PHY samples the logical shared level at each UART bit center. Multiple active drivers produce `Indeterminate` for digital contention rather than a fabricated deterministic voltage or CRC failure. Local failsafe assumptions only choose what the idle line means logically, not any resistor/cable model. UART decode distinguishes valid bytes, parity errors, framing errors, missing/indeterminate bits and disabled receivers. Bit faults are deterministic *receiver sample* perturbations, not hardware damage.
+
+See [RS485_DIGITAL_PHY.md](RS485_DIGITAL_PHY.md) for details, invariants, bounded per-frame scheduling and fidelity gaps.
 
 ## Planned boundaries (not crates yet)
 
