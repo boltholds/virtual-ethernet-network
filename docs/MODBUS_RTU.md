@@ -20,7 +20,7 @@ In digital mode, `PhysicalEvent::Character` with `UartSample::Byte` is delivered
 
 Cross-LOD integration tests assert one matching FC03 reply, broadcast writes without replies, bit-level parity fault -> timeout, collision -> timeout, and rejection of unsupported UART format.
 
-**Boundary:** One `ModbusBus` owns one transport. The shared kernel's current minimal coordinator does not yet prevent *two different* participant instances from claiming the same `BusId`. That must be enforced in a future global bus registry. The digital PHY remains a digital/logic model, not analog electrical conformance.
+**Boundary:** One `ModbusBus` owns one transport. The new `ModbusBusHost` additionally rejects different registered participants claiming the same `BusId` (including mixed LOD modes) using atomic session-scoped claims. The minimal time coordinator remains single-participant; unregistered runners and separate registries are not automatically detected. The digital PHY remains a digital/logic model, not analog electrical conformance.
 
 ## Not implemented
 
@@ -32,7 +32,7 @@ Cross-LOD integration tests assert one matching FC03 reply, broadcast writes wit
 
 ## Next vertical slice
 
-1. Global bus ownership validation across separate simulation participants; shared semantics for configuration and cross-bus routing.
+1. Make the future multi-participant coordinator require a shared authoritative registry for all bus-owning protocols and PHYs; resolve cross-participant causality, not just BusId uniqueness.
 2. Atomic master request submission/rollback under timestamp overflow, complete protocol function coverage, and explicit retry policies.
 3. Real oscil­loscope captures (not yet supplied), calibrated receiver delay and differential voltage/cable measurements.
 4. Property-based randomized tests around UART sampling and t1.5/t3.5 boundaries.

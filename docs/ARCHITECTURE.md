@@ -5,14 +5,14 @@
 The VEN workspace contains two **reusable, VEN-independent** crates, `sim-time` and `sim-kernel`. They define one virtual time domain and participant contracts. They are deliberately separate packages so PLC Web, Gefest integrations, and other participants can use the same primitives later. Their current home in this workspace is a bootstrap location, **not** a claim that integration into other repositories already exists.
 
 - `sim-time`: integer nanosecond instants/durations; no wall-clock dependency.
-- `sim-kernel`: time grants, early-return results, coordinator validation, externally observable outputs.
+- `sim-kernel`: time grants, early-return results, coordinator validation, externally observable outputs and a generic session-scoped `ResourceRegistry<R>` with typed `ParticipantId` and atomic exclusive resource claims.
 - `ven-core`: network port identifiers and opaque encoded frames.
 - `ven-scheduler`: local, cancellation-capable, stable ordered network-event queue.
 - `ven-medium`: elementary full-duplex point-to-point serialization; RS-485 two-wire medium with UART character timing and configurable driver-enable, driver-release, and receiver-enable durations.
 - `ven-topology`: physical link adjacency and multiple RS-485 ports attached to one shared BusId.
 - `ven-rs485-phy`: opt-in bit-sampled logical RS-485 bus with modeled TX/RX turnaround, conservative digital contention, parity/framing/uncertainty reports and deterministic receiver-side faults. Independently hosted as a `SimulationParticipant` (not yet wired into the Modbus adapter).
 - `ven-modbus`: independent Modbus RTU codec, CRC, UART character/timing parser, limited master/slave state machines for 0x03/0x06.
-- `ven-modbus-sim`: protocol adapter above VEN UART characters, t3.5 finalization and master response deadlines.
+- `ven-modbus-sim`: protocol adapter above VEN UART characters, t3.5 finalization and master response deadlines. The `ModbusBusHost` moves participants into one host and rejects duplicate `BusId` across its registered executors, without exposing mutable transport topology references.
 - `ven-sim`: a standalone/embeddable VEN participant binding network events to shared time contracts; emits frame arrivals, per-character UART events, immediate collision notifications and observable driver-release events.
 - `ven-modbus-sim::DigitalModbusRtuLine`: translates `PhysicalEvent::Character` bit-sampled bytes and parity/framing errors into the same RTU protocol states, drives slave replies, preserves shared virtual-time deadlines and prevents duplicate receive sources within one bus instance.
 
@@ -45,11 +45,11 @@ Do **not** label this library a compliant PROFINET, EtherCAT, Modbus, or physica
 
 ## Simulation levels and physical-model boundary
 
-The high-throughput network participant (`ven-sim`) retains character/frame-level RS-485 and its existing Modbus protocol adapter; `ven-rs485-phy` offers a distinct opt-in bit-level **digital** participant on the same `sim-time`/`sim-kernel` contracts. They are now connected through `ven-modbus-sim::ModbusBus`, an explicit enum with either `CharacterTimed(ModbusRtuLine)` or `DigitalBits(DigitalModbusRtuLine)`. One `ModbusBus` owns exactly one transport scheduler, and the existing Modbus RTU receiver/master/slave semantics drive both. **Global** uniqueness of BusId across separate participants is not yet enforced: a future multi-participant coordinator must own an authoritative bus registry.
+The high-throughput network participant (`ven-sim`) retains character/frame-level RS-485 and its existing Modbus protocol adapter; `ven-rs485-phy` offers a distinct opt-in bit-level **digital** participant on the same `sim-time`/`sim-kernel` contracts. They are now connected through `ven-modbus-sim::ModbusBus`, an explicit enum with either `CharacterTimed(ModbusRtuLine)` or `DigitalBits(DigitalModbusRtuLine)`. One `ModbusBus` owns exactly one transport scheduler, and the existing Modbus RTU receiver/master/slave semantics drive both. **Session-local** uniqueness is enforced among participants registered with `ModbusBusHost`, using generic `sim-kernel::resources::ResourceRegistry<BusId>`. Arbitrary unregistered participants remain outside its protection; the future multi-participant coordinator must require all bus owners to register before driving time.
 
 The PHY samples the logical shared level at each UART bit center. Multiple active drivers produce `Indeterminate` for digital contention rather than a fabricated deterministic voltage or CRC failure. Local failsafe assumptions only choose what the idle line means logically, not any resistor/cable model. UART decode distinguishes valid bytes, parity errors, framing errors, missing/indeterminate bits and disabled receivers. Bit faults are deterministic *receiver sample* perturbations, not hardware damage.
 
-See [RS485_DIGITAL_PHY.md](RS485_DIGITAL_PHY.md) for details, invariants, bounded per-frame scheduling and fidelity gaps.
+See [RS485_DIGITAL_PHY.md](RS485_DIGITAL_PHY.md) for details, invariants, bounded per-frame scheduling and fidelity gaps; see [BUS_OWNERSHIP.md](BUS_OWNERSHIP.md) for resource claims and host constraints.
 
 ## Planned boundaries (not crates yet)
 
