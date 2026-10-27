@@ -70,6 +70,9 @@ fn two_modbus_transmitters_conflict_instead_of_auto_retransmitting() {
     let b = RtuAdu::new(2, 3, vec![2]).unwrap();
     net.send_rs485(PortId(1), Frame::new(a.encode())).unwrap();
     net.send_rs485(PortId(2), Frame::new(b.encode())).unwrap();
+    let collision = net.advance(TimeGrant { until: SimInstant::ZERO }).unwrap();
+    assert!(matches!(&collision.outputs[0].value,
+        NetworkOutput::Rs485Collision { bus: BusId(1), .. }));
     let result = net.advance(TimeGrant { until: SimInstant::from_nanos(100_000_000) }).unwrap();
     assert_eq!(result.outputs.len(), 2);
     assert!(result.outputs.iter().all(|event| {
