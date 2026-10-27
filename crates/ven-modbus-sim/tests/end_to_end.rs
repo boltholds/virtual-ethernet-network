@@ -144,3 +144,75 @@ fn simultaneous_drivers_do_not_produce_valid_modbus_responses() {
         event, LineEvent::Master { event: MasterEvent::Reply(_), .. }
     )));
 }
+
+#[test]
+fn mid_frame_collision_invalidates_receiver_at_collision_time() {
+    let mut line = line();
+    let request = RtuAdu::new(2, 3, vec![0, 7, 0, 1]).unwrap();
+    line.request(PortId(1), request, UartFault::None).unwrap();
+    let first_character = SimInstant::from_nanos(1_145_834);
+    let first = line.advance(sim_kernel::TimeGrant { until: first_character }).unwrap();
+    assert_eq!(first.reached, first_character);
+    // A slave has already received the first UART character at this point.
+    let jammer = RtuAdu::new(3, 6, vec![0, 7, 0, 9]).unwrap();
+    line.network_mut().send_rs485_uart(
+        PortId(3), ven_core::Frame::new(jammer.encode()), UartFault::None
+    ).unwrap();
+    let collision = line.advance(sim_kernel::TimeGrant { until: first_character }).unwrap();
+    assert_eq!(collision.reached, first_character);
+    assert!(collision.outputs.iter().any(|event| matches!(
+        event.value, LineEvent::BusContention { bus: BusId(1), .. }
+    )));
+    // Future character events from both contending drivers are suppressed.
+    let events = drive(&mut line, SimInstant::from_nanos(150_000_000));
+    assert!(events.iter().any(|event| matches!(
+        event, LineEvent::Master { event: MasterEvent::TimedOut { address: 2, .. }, .. }
+    )));
+    assert!(!events.iter().any(|event| matches!(
+        event, LineEvent::Master { event: MasterEvent::Reply(_), .. }
+    )));
+}
+
+#[test]
+fn driver_release_overlap_with_slave_reply_causes_contention() {
+    let mut line = line();
+    // Driver keeps DE asserted far beyond its last stop bit. The slave's
+    // otherwise legal t3.5 reply now overlaps the still-driven RS-485 line.
+    line.network_mut().set_rs485_turnaround(PortId(1),
+        ven_medium::rs485::Rs485Turnaround {
+            driver_enable: SimDuration::ZERO,
+            driver_release: SimDuration::from_nanos(20_000_000),
+            receiver_enable: SimDuration::ZERO,
+        }).unwrap();
+    line.request(PortId(1), RtuAdu::new(2, 3, vec![0, 7, 0, 1]).unwrap(),
+        UartFault::None).unwrap();
+    let events = drive(&mut line, SimInstant::from_nanos(150_000_000));
+    assert!(events.iter().any(|event| matches!(event, LineEvent::BusContention { .. })));
+    assert!(events.iter().any(|event| matches!(
+        event, LineEvent::Master { event: MasterEvent::TimedOut { address: 2, .. }, .. }
+    )));
+    assert!(!events.iter().any(|event| matches!(
+        event, LineEvent::Master { event: MasterEvent::Reply(_), .. }
+    )));
+}
+
+#[test]
+fn delayed_receiver_reenable_causes_timeout_without_collision() {
+    let mut line = line();
+    line.network_mut().set_rs485_turnaround(PortId(1),
+        ven_medium::rs485::Rs485Turnaround {
+            driver_enable: SimDuration::ZERO,
+            driver_release: SimDuration::ZERO,
+            receiver_enable: SimDuration::from_nanos(60_000_000),
+        }).unwrap();
+    line.request(PortId(1), RtuAdu::new(2, 3, vec![0, 7, 0, 1]).unwrap(),
+        UartFault::None).unwrap();
+    let events = drive(&mut line, SimInstant::from_nanos(150_000_000));
+    assert!(!events.iter().any(|event| matches!(event, LineEvent::BusContention { .. })));
+    assert!(events.iter().any(|event| matches!(
+        event, LineEvent::Master { event: MasterEvent::TimedOut { address: 2, .. }, .. }
+    )));
+    assert!(!events.iter().any(|event| matches!(
+        event, LineEvent::Master { event: MasterEvent::Reply(_), .. }
+    )));
+}
