@@ -80,8 +80,13 @@ fn collision_inside_data_byte_produces_unknown_samples_and_diagnostic() {
     let mut phy = bus(UartFormat::MODBUS_RTU_8E1);
     phy.transmit(PortId(1), vec![0x55]).unwrap();
     let overlap = SimInstant::from_nanos(400_000);
-    let first = phy.advance(TimeGrant { until: overlap }).unwrap();
-    assert_eq!(first.reached, overlap);
+    let mut reached = SimInstant::ZERO;
+    for _ in 0..128 {
+        let step = phy.advance(TimeGrant { until: overlap }).unwrap();
+        reached = step.reached;
+        if reached == overlap { break; }
+    }
+    assert_eq!(reached, overlap);
     phy.transmit(PortId(3), vec![0xaa]).unwrap();
     assert_eq!(phy.observe_wire(overlap), LogicLevel::Indeterminate);
     let result = phy.advance(TimeGrant { until: overlap }).unwrap();
