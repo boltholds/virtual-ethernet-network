@@ -12,6 +12,16 @@ Primary reference: [MODBUS over Serial Line Specification and Implementation Gui
 - `ven-modbus-sim` binds per-port `RtuReceiver`s to VEN characters, runs receive-flush and timeout deadlines under the shared `TimeGrant`, and automatically transmits slave replies after RTU frame silence. On a new immediate `Rs485Collision` event, the adapter invalidates **partially received frames at the overlap time**; transmission-completion contention reports are only summaries.
 - Per-port `Rs485Turnaround` exposes `driver_enable`, `driver_release` and `receiver_enable`. Tests check collisions during post-data DE hold, delayed RE readiness leading to master timeout, and partial-frame invalidation when a second driver starts mid-frame.
 
+## Opt-in bit-sampled Modbus RTU connection
+
+`ModbusBus::character_timed(network, timing)` uses the original `VenNetwork` character-completion transport; `ModbusBus::digital_bits(phy)` constructs a `DigitalModbusRtuLine` and derives Modbus timing from the PHY's UART/baud configuration (rejecting invalid 8N1 RTU configuration instead of silently falling back). Only one backend is stored per bus instance.
+
+In digital mode, `PhysicalEvent::Character` with `UartSample::Byte` is delivered to the **same** RTU receiver/master/slave state machines. `ParityError`, `FramingError`, `Indeterminate`, or disabled receive results invalidate that port's incomplete RTU frame and surface `LineEvent::PhysicalReceiveError`; no valid bytes or synthetic Modbus exceptions are fabricated. `PhysicalEvent::Contention` invalidates all local incomplete receivers and surfaces a bus diagnostic. t3.5 and master timeout are controlled only by shared virtual time.
+
+Cross-LOD integration tests assert one matching FC03 reply, broadcast writes without replies, bit-level parity fault -> timeout, collision -> timeout, and rejection of unsupported UART format.
+
+**Boundary:** One `ModbusBus` owns one transport. The shared kernel's current minimal coordinator does not yet prevent *two different* participant instances from claiming the same `BusId`. That must be enforced in a future global bus registry. The digital PHY remains a digital/logic model, not analog electrical conformance.
+
 ## Not implemented
 
 - Full Modbus application model: only functions 0x03 and 0x06 are implemented; remaining function codes, full register/device configuration and extended exception policies are not. Automatic retries are not implemented. DE/RE turnaround is now modeled separately from RTU `t3.5`, with configurable delays, but without electrical pin/waveform simulation.
@@ -22,7 +32,7 @@ Primary reference: [MODBUS over Serial Line Specification and Implementation Gui
 
 ## Next vertical slice
 
-1. Add immediate collision-invalidation events (a currently detected overlap is reported at modeled transmission completion) and per-device turnaround/release delays.
-2. Extend Modbus function handling, physical register maps, exception policy and explicit scheduled retries.
-3. Expand high-fidelity UART/RS-485 fault models and independently validate against real reference traces/hardware.
-4. Add property-based and randomized differential tests for t1.5/t3.5 and character rounding boundaries.
+1. Global bus ownership validation across separate simulation participants; shared semantics for configuration and cross-bus routing.
+2. Atomic master request submission/rollback under timestamp overflow, complete protocol function coverage, and explicit retry policies.
+3. Real oscil­loscope captures (not yet supplied), calibrated receiver delay and differential voltage/cable measurements.
+4. Property-based randomized tests around UART sampling and t1.5/t3.5 boundaries.

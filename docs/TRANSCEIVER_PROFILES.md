@@ -112,4 +112,4 @@ The example's expected timestamps are **illustrative**. Production comparisons s
 - **Real waveform comparisons:** **none performed**; no oscilloscope captures were supplied.
 - **Hardware-calibrated physics:** **not implemented**.
 
-The next upgrade should ingest the first actual RO/DE/DI and differential A/B captures, derive model predictions on a shared clock, and report timing error distributions under a reproducible measurement campaign.
+A runnable example now compares a canonical capture with actual `Rs485DigitalPhy` bit events. Run it with your own capture using the procedure in [CAPTURE_PROTOCOL.md](CAPTURE_PROTOCOL.md). This is a **sample-level comparator**, not a full physical waveform fit or a statistical characterization of a part number; hardware evidence remains absent until captures are supplied.

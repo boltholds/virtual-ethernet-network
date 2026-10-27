@@ -153,3 +153,19 @@ fn no_duplicate_slave_address_on_digital_bus() {
         Err(LineError::DuplicatePort),
     );
 }
+
+#[test]
+fn two_slaves_cannot_claim_one_modbus_address_on_a_digital_bus() {
+    let mut phy = Rs485DigitalPhy::new(
+        BusId(7), 9600, UartFormat::MODBUS_RTU_8E1,
+        SimDuration::ZERO, IdleLine::High,
+    ).unwrap();
+    phy.add_port(PortId(2), TransceiverProfile::default()).unwrap();
+    phy.add_port(PortId(3), TransceiverProfile::default()).unwrap();
+    let mut bus = ModbusBus::digital_bits(phy).unwrap();
+    bus.attach_slave(PortId(2), 2).unwrap();
+    assert_eq!(
+        bus.attach_slave(PortId(3), 2),
+        Err(LineError::DuplicateSlaveAddress),
+    );
+}

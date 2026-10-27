@@ -40,7 +40,7 @@ loop {
 }
 ```
 
-The integration tests additionally feed emitted bytes into the existing `ven-modbus::RtuReceiver`. This is a test bridge, **not** an automatic production connection to `ven-modbus-sim`.
+The bit-level `DigitalModbusRtuLine` adapter in `ven-modbus-sim` now consumes PHY character events directly, propagates parity/framing/indeterminate sample failures as typed diagnostics, and uses the same Modbus FC03/FC06 endpoint logic. `ModbusBus` selects one transport LOD per bus instance; the previous raw-PHY tests are still useful independent reference checks.
 
 ## Manufacturer profiles and scope comparison
 
@@ -57,7 +57,7 @@ See [TRANSCEIVER_PROFILES.md](TRANSCEIVER_PROFILES.md) for pin conditions, captu
 - The UART receiver's ideal clock samples near bit centers; no independently drifting receiver clocks, oversampling, framing recovery, metastability, start-bit detection from noise or variable per-receiver propagation.
 - In `IdleLine::High`, the HIGH level is a configured **assumption**; a real terminated cable with insufficient failsafe bias can be indeterminate.
 - The sample scheduler is O(number of receivers × characters × bits), intended for high-fidelity small test networks, not unbounded large-scale PHY simulation.
-- This crate is **standalone/opt-in**. A future VEN LOD switch must ensure only one transport model emits receive data for any given bus, and must preserve causality across participants.
+- This crate remains **standalone/opt-in**. `ModbusBus` now selects one transport per instance, preserving the single virtual-time participant. A future multi-participant coordinator must still detect duplicate ownership of a physical BusId across independent instances.
 
 ## Primary grounding
 
