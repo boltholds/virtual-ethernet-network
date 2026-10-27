@@ -70,13 +70,13 @@ time_ns,channel,millivolts
 400,RO,3300
 ```
 
-Supported names: `DE`, `RE`, `DI`, `RO`, `A`, `B`, `DIFF`. Convert manufacturer-specific CSVs to this exact three-column format without discarding original raw files. The `DIFF` channel should be **measured differentially or explicitly derived from A-B samples** with documented polarity, probe type and common ground.
+Supported names: `DE`, `RE`, `DI`, `RO`, `A`, `B`, `DIFF`. Convert manufacturer-specific CSVs to this exact three-column format without discarding original raw files. The `DIFF` channel should be **measured differentially or explicitly derived from A-B samples** with documented polarity, probe type and common ground. The physical `A/B` bus voltage and digital `RO` output are different observation points; transceiver propagation delay must not be ignored.
 
 For each real acquisition, preserve metadata: device part/revision; VCC; temperature; baud and UART format; DE/RE sequence; load and terminations; cable/stub lengths; oscilloscope/probe model; sample rate; timebase; channel thresholds; which direction is being measured. Record whether a receiver is starting from shutdown. Without this, a timing difference cannot be meaningfully attributed.
 
 ### Two explicit comparisons
 
-1. **Digital sample comparison (implemented).** Use an actual **DE rising edge** in the measured trace as the shared time origin, then compare predicted bit-center sample levels for the `RO` or `DIFF` channel with the measured samples. Require an explicit threshold range and maximum sample age. Missing capture samples, indeterminate voltage bands, prediction uncertainty and mismatches are not counted as passes. Never auto-shift the RO trace to maximize agreement.
+1. **Digital sample comparison (implemented).** Use an actual **DE rising edge** in the measured trace as the shared time origin. `trace::expected_from_phy(...)` requires explicit `ObservationPoint::ReceiverInput` for logic sampled on the bus or `ObservationPoint::ReceiverOutput { propagation }` for the transceiver RO output. Select a propagation assumption from the datasheet or a measured calibration; it is **not** an exact electrical RO model. Compare those bit-center levels with the `RO` or `DIFF` channel, as appropriate. Require an explicit threshold range and maximum sample age. Missing capture samples, indeterminate voltage bands, prediction uncertainty and mismatches are not counted as passes. Never auto-shift the RO trace to maximize agreement.
 2. **Analog waveform fit (NOT implemented).** Would require driver/receiver analog transfer characteristics, cable geometry and impedance, rise/fall slew, receiver hysteresis and temperature dependence. Merely sampling `A` and `B` voltage in a CSV does not magically supply an electrical solver.
 
 ### Library example
@@ -103,7 +103,7 @@ assert!(!summary.all_matched(expected.len()) || findings.len() == expected.len()
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-The example's expected timestamps are **illustrative**. Production comparisons should derive predictions from a matching PHY run with `set_trace_bits(true)` using `trace::expected_from_phy(...)`; these are *not measured values*. The code above is documentation of the API, not an automatically executable calibration/verification report.
+The example's expected timestamps are **illustrative**. Production comparisons should derive predictions from a matching PHY run with `set_trace_bits(true)` using `trace::expected_from_phy(...)` and a deliberate `ObservationPoint`. These predictions are *not measured values*. A RO delay chosen from the datasheet is only an approximation and differs by operating condition and edge direction. The code above is documentation of the API, not an automatically executable calibration/verification report.
 
 ## Evidence levels
 
