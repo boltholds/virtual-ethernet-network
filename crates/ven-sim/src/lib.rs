@@ -249,33 +249,51 @@ impl VenNetwork {
     ) -> Result<Rs485TransmissionWindow, VenError> {
         let (bus, _) = self.topology.bus_for_port(from).ok_or(VenError::MissingBus)?;
         let medium = self.buses.get(&bus).ok_or(VenError::MissingBus)?;
+        let config = self.port_config(from);
         let bytes = frame.bytes;
         if let UartFault::GapAfter { index, .. }
             | UartFault::CorruptByte { index, .. }
             | UartFault::DropByte { index } = fault
         {
-            if index >= bytes.len() || matches!(fault, UartFault::GapAfter { .. }) && index + 1 == bytes.len() { return Err(VenError::InvalidUartFault); }
+            if index >= bytes.len()
+                || matches!(fault, UartFault::GapAfter { .. }) && index + 1 == bytes.len()
+            {
+                return Err(VenError::InvalidUartFault);
+            }
         }
-        if self.in_flight.values().any(|tx| tx.bus == bus && tx.sender == from && tx.finishes > self.now) {
+        if self.driver_busy_until.get(&from).is_some_and(|until| *until > self.now) {
             return Err(VenError::TransmitterBusy);
         }
-        let mut window = medium.transmission(bytes.len(), self.now).map_err(VenError::Rs485)?;
-        let extra = match fault { UartFault::GapAfter { silence, .. } => silence, _ => SimDuration::ZERO };
-        window.finishes = window.finishes.checked_add(extra).ok_or(VenError::Rs485(Rs485Error::TimeOverflow))?;
-        window.arrives = window.arrives.checked_add(extra).ok_or(VenError::Rs485(Rs485Error::TimeOverflow))?;
+        let (mut window, _, _) = medium.with_turnaround(bytes.len(), self.now, config)
+            .map_err(VenError::Rs485)?;
+        let extra = match fault {
+            UartFault::GapAfter { silence, .. } => silence,
+            _ => SimDuration::ZERO,
+        };
+        window.finishes = window.finishes.checked_add(extra)
+            .ok_or(VenError::Rs485(Rs485Error::TimeOverflow))?;
+        window.arrives = window.arrives.checked_add(extra)
+            .ok_or(VenError::Rs485(Rs485Error::TimeOverflow))?;
+        let released = window.finishes.checked_add(config.driver_release)
+            .ok_or(VenError::Rs485(Rs485Error::TimeOverflow))?;
+        let ready = released.checked_add(config.receiver_enable)
+            .ok_or(VenError::Rs485(Rs485Error::TimeOverflow))?;
         let txid = self.next_transmission_id;
         let next_id = txid.checked_add(1).ok_or(VenError::TransmissionIdExhausted)?;
-        // Stage the whole schedule before committing the transmission; no
-        // partially registered character stream if an insertion fails.
+
+        // Stage all local events before mutating transmission state.
         let mut pending = self.scheduler.clone();
+        Self::add_collision_events(&mut pending, &self.in_flight, bus, from, self.now, released)?;
         for (index, original) in bytes.iter().copied().enumerate() {
-            let drop = matches!(fault, UartFault::DropByte { index: target } if target == index);
-            if drop { continue; }
+            if matches!(fault, UartFault::DropByte { index: target } if target == index) {
+                continue;
+            }
             let byte = match fault {
                 UartFault::CorruptByte { index: target, xor_mask } if target == index => original ^ xor_mask,
                 _ => original,
             };
-            let mut when = medium.character_arrival(index + 1, self.now).map_err(VenError::Rs485)?;
+            let mut when = medium.character_arrival(index + 1, window.starts)
+                .map_err(VenError::Rs485)?;
             if let UartFault::GapAfter { index: target, silence } = fault {
                 if index > target {
                     when = when.checked_add(silence).ok_or(VenError::Rs485(Rs485Error::TimeOverflow))?;
@@ -284,18 +302,18 @@ impl VenNetwork {
             pending.schedule_at(when, LocalEvent::Rs485Character { txid, byte })
                 .map_err(VenError::Schedule)?;
         }
-        pending.schedule_at(window.arrives, LocalEvent::Rs485Complete(txid)).map_err(VenError::Schedule)?;
+        pending.schedule_at(std::cmp::max(window.arrives, released), LocalEvent::Rs485Complete(txid))
+            .map_err(VenError::Schedule)?;
+        if config != Rs485Turnaround::default() {
+            pending.schedule_at(released, LocalEvent::Rs485DriverReleased { bus, sender: from })
+                .map_err(VenError::Schedule)?;
+        }
         self.scheduler = pending;
         self.next_transmission_id = next_id;
-        let mut contended = false;
-        for tx in self.in_flight.values_mut() {
-            if tx.bus == bus && tx.starts < window.finishes && self.now < tx.finishes {
-                tx.contended = true;
-                contended = true;
-            }
-        }
+        let contended = self.mark_contentions(bus, self.now, released);
+        self.commit_port_turnaround(from, released, ready);
         self.in_flight.insert(txid, Rs485InFlight {
-            bus, sender: from, starts: window.starts, finishes: window.finishes,
+            bus, sender: from, starts: self.now, finishes: window.finishes, released_at: released,
             frame: Frame::new(bytes), contended, uart: true,
         });
         Ok(window)
