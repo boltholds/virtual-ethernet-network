@@ -3,6 +3,7 @@
 
 pub mod resources;
 pub mod conservative;
+pub mod external_boundary;
 
 use sim_time::SimInstant;
 use std::fmt;
