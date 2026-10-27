@@ -93,7 +93,7 @@ fn rs485_one_sender_fans_out_to_other_nodes() {
     let targets: Vec<_> = out.outputs.iter().map(|x| {
         match &x.value {
             NetworkOutput::Frame(arrival) => arrival.to,
-            NetworkOutput::Rs485Contention { .. } => panic!("not contended"),
+            NetworkOutput::Rs485Contention { .. } | NetworkOutput::UartCharacter { .. } => panic!("unexpected event"),
         }
     }).collect();
     assert_eq!(targets, vec![PortId(2), PortId(3)]);

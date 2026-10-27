@@ -197,7 +197,7 @@ impl VenNetwork {
             | UartFault::CorruptByte { index, .. }
             | UartFault::DropByte { index } = fault
         {
-            if index >= bytes.len() { return Err(VenError::InvalidUartFault); }
+            if index >= bytes.len() || matches!(fault, UartFault::GapAfter { .. }) && index + 1 == bytes.len() { return Err(VenError::InvalidUartFault); }
         }
         if self.in_flight.values().any(|tx| tx.bus == bus && tx.sender == from && tx.finishes > self.now) {
             return Err(VenError::TransmitterBusy);
