@@ -5,7 +5,7 @@ use ven_medium::rs485::{Rs485Turnaround, UartFormat};
 use ven_modbus::{ReceiveEvent, RtuAdu, RtuReceiver, RtuTiming};
 use ven_rs485_phy::{
     IdleLine, LogicLevel, PhysicalEvent, PhyError,
-    Rs485DigitalPhy, TransceiverProfile, UartSample,
+    Rs485DigitalPhy, SampleFault, TransceiverProfile, UartSample,
 };
 use ven_topology::BusId;
 
@@ -155,4 +155,52 @@ fn zero_baud_and_large_frame_are_rejected() {
     assert_eq!(phy.transmit(PortId(1), vec![]), Err(PhyError::EmptyFrame));
     assert_eq!(phy.transmit(PortId(1), vec![0; 257]), Err(PhyError::TooManyBytes));
     assert_eq!(phy.active_transmission_count(), 0);
+}
+
+#[test]
+fn injected_parity_bit_flip_reports_parity_error() {
+    let mut phy = bus(UartFormat::MODBUS_RTU_8E1);
+    phy.inject_sample_fault(PortId(2), 0, 9, SampleFault::Flip).unwrap();
+    phy.transmit(PortId(1), vec![0x55]).unwrap();
+    let outputs = drive(&mut phy, SimInstant::from_nanos(3_000_000));
+    assert!(outputs.iter().any(|(_, event)| matches!(event,
+        PhysicalEvent::Character {
+            to: PortId(2), sample: UartSample::ParityError, ..
+        }
+    )));
+    assert!(outputs.iter().any(|(_, event)| matches!(event,
+        PhysicalEvent::Character {
+            to: PortId(3), sample: UartSample::Byte(0x55), ..
+        }
+    )));
+}
+
+#[test]
+fn injected_stop_bit_flip_reports_framing_error() {
+    let mut phy = bus(UartFormat::MODBUS_RTU_8N2);
+    phy.inject_sample_fault(PortId(2), 0, 10, SampleFault::Flip).unwrap();
+    phy.transmit(PortId(1), vec![0x3c]).unwrap();
+    let outputs = drive(&mut phy, SimInstant::from_nanos(3_000_000));
+    assert!(outputs.iter().any(|(_, event)| matches!(event,
+        PhysicalEvent::Character {
+            to: PortId(2), sample: UartSample::FramingError, ..
+        }
+    )));
+}
+
+#[test]
+fn unknown_sample_is_not_fabricated_into_a_valid_byte() {
+    let mut phy = bus(UartFormat::MODBUS_RTU_8E1);
+    phy.inject_sample_fault(PortId(2), 0, 3, SampleFault::ForceIndeterminate).unwrap();
+    assert_eq!(
+        phy.inject_sample_fault(PortId(2), 0, 11, SampleFault::Flip),
+        Err(PhyError::InvalidBitFault)
+    );
+    phy.transmit(PortId(1), vec![0xff]).unwrap();
+    let outputs = drive(&mut phy, SimInstant::from_nanos(3_000_000));
+    assert!(outputs.iter().any(|(_, event)| matches!(event,
+        PhysicalEvent::Character {
+            to: PortId(2), sample: UartSample::Indeterminate, ..
+        }
+    )));
 }
