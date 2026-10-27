@@ -42,6 +42,14 @@ loop {
 
 The integration tests additionally feed emitted bytes into the existing `ven-modbus::RtuReceiver`. This is a test bridge, **not** an automatic production connection to `ven-modbus-sim`.
 
+## Manufacturer profiles and scope comparison
+
+The `profiles` module provides pinned datasheet timing tables for ADM3485E and THVD1450 with distinct typical and maximum values, separate receiver-active vs receiver-from-shutdown timing paths, and an **opt-in guard-planning approximation**. These are not calibrated pin-level waveforms or unconditional temperature/voltage guarantees.
+
+The `trace` module ingests canonical oscilloscope CSV samples (time_ns,channel,millivolts). It compares explicitly predicted UART **bit-center** levels against captured samples using a separately measured DE-rising trigger. It never aligns by the first RO edge, which would erase actual propagation-delay differences. Missing, ambiguous, mismatched and indeterminate predictions remain distinct outcomes. Current tests use only **synthetic traces**; no actual hardware capture has been provided or validated.
+
+See [TRANSCEIVER_PROFILES.md](TRANSCEIVER_PROFILES.md) for pin conditions, capture format, reference sources and how to perform a real comparison.
+
 ## Boundaries and future work
 
 - This is a **digital sampled logic model, not an analog line solver**: no true differential voltages, receiver ±200 mV thresholds, hysteresis, termination, common-mode, differential impedance, failsafe-bias network sizing, reflections, slew rates, propagation by trunk/stub length, cable damage or electromagnetic noise power.

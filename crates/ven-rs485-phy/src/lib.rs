@@ -5,6 +5,9 @@
 //! Multiple enabled drivers conservatively resolve to Indeterminate even
 //! when they happen to drive the same logic value.
 
+pub mod profiles;
+pub mod trace;
+
 use sim_kernel::{AdvanceOutcome, SimulationParticipant, TimeGrant, TimedOutput};
 use sim_time::{SimDuration, SimInstant};
 use std::collections::BTreeMap;

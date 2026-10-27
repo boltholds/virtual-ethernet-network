@@ -13,7 +13,7 @@ VEN is designed to run independently or as a **simulation participant** inside t
 | `ven-core` | Opaque network frames and port identifiers |
 | `ven-scheduler` | Specialized, locally ordered and cancellable network event queue |
 | `ven-medium` | Timed full-duplex links and RS-485 shared bus with UART duration and configurable DE/RE turnaround |
-| `ven-rs485-phy` | Opt-in RS-485 digital PHY: UART bit sampling, logical contention, failsafe assumption and bit-sample faults |
+| `ven-rs485-phy` | Opt-in RS-485 digital PHY; manufacturer timing metadata and oscilloscope sample-comparison tools |
 | `ven-topology` | Typed node/port/link/RS-485 bus connectivity |
 | `ven-modbus` | Modbus RTU codec, timing, receiver and limited 0x03/0x06 session state machines |
 | `ven-modbus-sim` | Protocol adapter integrating actual VEN UART events, Modbus endpoints and deadlines |
@@ -37,7 +37,7 @@ Currently this is **a working foundation, not a complete Ethernet/industrial pro
 
 A separate, opt-in `ven-rs485-phy` implements a slower, **bit-sampled digital** RS-485 model. It is its own `SimulationParticipant`, currently exercised in independent integration tests. It does **not** automatically replace `ven-sim` or plug into `ven-modbus-sim` yet. Bit-center sampling detects start/data/parity/stop behavior, indeterminate shared-line contention and injected receiver-bit faults; it is **not** an analog/electrical circuit model.
 
-Next: integrate opt-in PHY into VEN's protocol/LOD routing without duplicating virtual-time ownership; validate physical transceiver profiles against datasheets and measured reference traces; then Ethernet switching and industrial protocol executors. See [RS-485 digital PHY](docs/RS485_DIGITAL_PHY.md) for its exact limits.
+Next: integrate opt-in PHY into VEN's protocol/LOD routing without duplicating virtual-time ownership; validate manufacturer timing **against actual supplied hardware captures**; then Ethernet switching and industrial protocol executors. See [RS-485 digital PHY](docs/RS485_DIGITAL_PHY.md) and [transceiver profiles / captures](docs/TRANSCEIVER_PROFILES.md) for fidelity limits.
 
 Architecture, invariants and non-goals are described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). See [docs/NETWORK_RELEVANCE.md](docs/NETWORK_RELEVANCE.md) for primary-source correctness and model fidelity audit, and [docs/MODBUS_RTU.md](docs/MODBUS_RTU.md) for the implemented protocol scope.
 

@@ -46,3 +46,7 @@ Wire the opt-in `ven-rs485-phy` into a shared bus-LOD selection API and the alre
 ## DE/RE timing basis
 
 Per-port turnaround is a configurable engineering parameter, not a universal RS-485 or Modbus timing. Driver enable/disable and receiver enable/disable are distinct transceiver timing characteristics. References: [Analog Devices AN-960](https://www.analog.com/en/resources/app-notes/an-960.html) and [TI RS-485 Half-Duplex EVM Guide](https://www.ti.com/lit/ug/sllu173c/sllu173c.pdf). Current VEN models one logical enable-settle delay, one post-data driver-release hold and one receiver-reenable delay; it does **not** reproduce voltage, bias, pin propagation edges or guaranteed electrical behavior of any named part.
+
+## New manufacturer timing metadata and oscilloscope comparison
+
+The digital PHY now includes separate manufacturer spec metadata (ADM3485E Rev D and THVD1450 SLLSEY3E Rev E) and a synthetic-tested canonical CSV waveform comparison API. The selected datasheet times represent different pin transition phenomena and test configurations, **not directly equivalent physical line propagation or UART receiver delays**. The guard planner provides *effective delays for a simulation scenario*, not automatically calibrated physical profiles. No real lab oscilloscope captures have been imported; hardware validation remains pending. See [TRANSCEIVER_PROFILES.md](TRANSCEIVER_PROFILES.md).
