@@ -28,31 +28,31 @@ Keep the original scope files immutable, and store a sidecar manifest with these
 
 The reusable Rust parser accepts only the following schema:
 
-\`\`\`csv
+```csv
 time_ns,channel,millivolts
 0,DE,0
 100,DE,3300
 100,RO,3300
 210,RO,0
 400,RO,3300
-\`\`\`
+```
 
 This block is **synthetic illustration**, not a measured device. Real datasets should record every relevant sampled timepoint (not just logic transitions) at an appropriate sampling rate for the baud and expected timing. Convert the scope's native time units and voltages with documented rounding; preserve times in integer nanoseconds relative to one acquisition time origin. Each channel's timestamps must be strictly increasing.
 
-The \`DE\`, \`RO\`, \`DI\`, \`RE\`, \`A\`, \`B\` and \`DIFF\` channels are supported by the parser. The first CLI comparator intentionally compares only digital **RO vs DE** with one supplied pair of logic-level voltage thresholds; physical A−B, analog slew, and receiver threshold behavior remain unvalidated. A differential measurement alone is **not** interpreted as a calibrated TTL/CMOS RO signal.
+The `DE`, `RO`, `DI`, `RE`, `A`, `B` and `DIFF` channels are supported by the parser. The first CLI comparator intentionally compares only digital **RO vs DE** with one supplied pair of logic-level voltage thresholds; physical A−B, analog slew, and receiver threshold behavior remain unvalidated. A differential measurement alone is **not** interpreted as a calibrated TTL/CMOS RO signal.
 
 ## Run the comparison
 
-The example requires a real acquisition file and known transmitted bytes. A sample command for a measured **9600-baud 8E1** request containing hexadecimal \`01 03 00 00 00 0A C5 CD\`:
+The example requires a real acquisition file and known transmitted bytes. A sample command for a measured **9600-baud 8E1** request containing hexadecimal `01 03 00 00 00 0A C5 CD`:
 
-\`\`\`sh
+```sh
 cargo run -p ven-rs485-phy --example compare_capture -- \
   captures/adm3485e-9600-rtu.csv 9600 01030000000AC5CD 800 2000 1000 62
-\`\`\`
+```
 
-Positional fields: \`csv\`, \`baud\`, \`transmitted-hex-bytes\`, \`low-mV\`, \`high-mV\`, \`max-sample-age-ns\`, \`assumed-RO-propagation-ns\`. The illustrative 800/2000 mV thresholds and 62 ns RO propagation **are not default calibration for all devices**, temperatures or probes; set values matching your receiver logic supply and measured operating conditions.
+Positional fields: `csv`, `baud`, `transmitted-hex-bytes`, `low-mV`, `high-mV`, `max-sample-age-ns`, `assumed-RO-propagation-ns`. The illustrative 800/2000 mV thresholds and 62 ns RO propagation **are not default calibration for all devices**, temperatures or probes; set values matching your receiver logic supply and measured operating conditions.
 
-The example uses **zero driver-enable and cable delay** and ideal 8E1 UART timing. Its result is a reproducible initial **digital sample comparison**, not full waveform calibration. For any other physical configuration, adapt the profile and propagation assumptions using \`ven-rs485-phy::profiles\` and \`Rs485DigitalPhy\` rather than shifting the measured trace.
+The example uses **zero driver-enable and cable delay** and ideal 8E1 UART timing. Its result is a reproducible initial **digital sample comparison**, not full waveform calibration. For any other physical configuration, adapt the profile and propagation assumptions using `ven-rs485-phy::profiles` and `Rs485DigitalPhy` rather than shifting the measured trace.
 
 The tool returns an error status if any bits mismatch, measurements are missing, or predictions/measurements are uncertain. It never silently labels these cases as passes.
 
