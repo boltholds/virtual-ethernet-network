@@ -358,7 +358,7 @@ impl SimulationParticipant for VenNetwork {
                             if !tx.contended {
                                 let members = &self.topology.bus(tx.bus).expect("bus exists").members;
                                 for &to in members {
-                                    if to != tx.sender && self.receiver_ready_at.get(&to).is_none_or(|ready| *ready <= event.at) {
+                                    if to != tx.sender && self.receiver_ready_at.get(&to).map_or(true, |ready| *ready <= event.at) {
                                         outputs.push(TimedOutput {
                                             at: event.at,
                                             value: NetworkOutput::UartCharacter {
