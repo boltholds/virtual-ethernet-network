@@ -11,6 +11,7 @@ members = [
     "crates/ven-modbus",
     "crates/ven-modbus-sim",
     "crates/ven-sim",
+    "crates/ven-plc-bridge",
 ]
 
 [workspace.package]

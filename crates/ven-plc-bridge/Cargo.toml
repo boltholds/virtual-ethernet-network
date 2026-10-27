@@ -1,0 +1,13 @@
+[package]
+name = "ven-plc-bridge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+sim-time = { path = "../sim-time" }
+sim-kernel = { path = "../sim-kernel" }
+serde_json = "1"
+
+[dev-dependencies]
