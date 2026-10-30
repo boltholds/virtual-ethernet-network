@@ -1,6 +1,7 @@
 //! Persistent Python ScheduledRuntime process, protocol v1 JSONL.
 //! See docs/PLC_PYTHON_RUNTIME_BRIDGE.md for deployment and causal limits.
 pub mod plant;
+pub mod modbus_valve;
 
 use sim_kernel::{AdvanceOutcome, TimeGrant, TimedOutput};
 use sim_kernel::conservative::{
@@ -56,6 +57,8 @@ pub enum IoMessage {
     PlcOutput { key: SignalKey, value: SignalValue },
     /// Controlled plant-only scenario fault; never inferred from CAD B-rep.
     ValveFault(plant::ValveFault),
+    /// Request an explicit FC03 poll; may be queued behind an in-flight FC06.
+    PollValve,
 }
 
 fn from_json(value: &Value) -> Result<SignalValue, BridgeError> {
@@ -196,6 +199,12 @@ impl PythonScheduledRuntime {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ScanPolling {
+    Disabled,
+    EveryScan { target: ParticipantId },
+}
+
 /// A *real* external Python engine wrapped in the shared causal time contract.
 /// Delivers committed PLC outputs only at scheduled scan boundaries.
 pub struct PythonPlcActor {
@@ -205,6 +214,7 @@ pub struct PythonPlcActor {
     inputs: BTreeMap<SignalKey, SignalValue>,
     previous: BTreeMap<SignalKey, SignalValue>,
     route: BTreeMap<SignalKey, ParticipantId>,
+    polling: ScanPolling,
 }
 
 impl PythonPlcActor {
@@ -217,10 +227,16 @@ impl PythonPlcActor {
         Ok(Self {
             runtime, now: SimInstant::ZERO, next_scan, inputs: BTreeMap::new(),
             previous: BTreeMap::new(), route,
+            polling: ScanPolling::Disabled,
         })
     }
 
     pub fn next_scan(&self) -> SimInstant { self.next_scan }
+
+    pub fn with_polling(mut self, policy: ScanPolling) -> Self {
+        self.polling = policy;
+        self
+    }
 }
 
 impl CausalParticipant<IoMessage> for PythonPlcActor {
@@ -256,6 +272,12 @@ impl CausalParticipant<IoMessage> for PythonPlcActor {
                         },
                     });
                 }
+            }
+            if let ScanPolling::EveryScan { target } = self.polling {
+                outputs.push(TimedOutput {
+                    at: grant.until,
+                    value: DirectedEvent { target, payload: IoMessage::PollValve },
+                });
             }
             self.previous = current;
             self.next_scan = self.next_scan.checked_add(self.runtime.period())

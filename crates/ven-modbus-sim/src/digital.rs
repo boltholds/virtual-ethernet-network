@@ -116,7 +116,20 @@ impl DigitalModbusRtuLine {
             }
             Endpoint::Slave { state, .. } => match state.receive(&frame) {
                 SlaveEvent::Ignored => {}
-                SlaveEvent::Reply(reply) => replies.push((port, reply)),
+                SlaveEvent::Reply(reply) => {
+                    if reply.function() == 6 && reply.data().len() == 4 {
+                        let data = reply.data();
+                        outputs.push(TimedOutput {
+                            at,
+                            value: LineEvent::SlaveWrite {
+                                port,
+                                register: u16::from_be_bytes([data[0], data[1]]),
+                                value: u16::from_be_bytes([data[2], data[3]]),
+                            },
+                        });
+                    }
+                    replies.push((port, reply));
+                },
                 SlaveEvent::BroadcastWriteApplied { register, value } =>
                     outputs.push(TimedOutput {
                         at, value: LineEvent::BroadcastWrite { port, register, value },

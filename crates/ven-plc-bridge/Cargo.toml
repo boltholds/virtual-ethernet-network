@@ -9,5 +9,9 @@ publish = false
 sim-time = { path = "../sim-time" }
 sim-kernel = { path = "../sim-kernel" }
 serde_json = "1"
+ven-core = { path = "../ven-core" }
+ven-modbus = { path = "../ven-modbus" }
+ven-modbus-sim = { path = "../ven-modbus-sim" }
+ven-topology = { path = "../ven-topology" }
 
 [dev-dependencies]

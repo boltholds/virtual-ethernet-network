@@ -42,6 +42,8 @@ pub enum LineEvent {
     Master { port: PortId, event: MasterEvent },
     Discarded { port: PortId, reason: RtuError },
     BroadcastWrite { port: PortId, register: u16, value: u16 },
+    /// Applied by an addressed slave after a valid FC06 frame, before master ACK.
+    SlaveWrite { port: PortId, register: u16, value: u16 },
     BusContention { bus: BusId, sender: PortId },
     PhysicalReceiveError { port: PortId, sample: ven_rs485_phy::UartSample },
 }
@@ -164,7 +166,20 @@ impl ModbusRtuLine {
             Endpoint::Slave { state, .. } => {
                 match state.receive(&frame) {
                     SlaveEvent::Ignored => {}
-                    SlaveEvent::Reply(response) => replies.push((port, response)),
+                    SlaveEvent::Reply(response) => {
+                        if response.function() == 6 && response.data().len() == 4 {
+                            let data = response.data();
+                            outputs.push(TimedOutput {
+                                at,
+                                value: LineEvent::SlaveWrite {
+                                    port,
+                                    register: u16::from_be_bytes([data[0], data[1]]),
+                                    value: u16::from_be_bytes([data[2], data[3]]),
+                                },
+                            });
+                        }
+                        replies.push((port, response));
+                    },
                     SlaveEvent::BroadcastWriteApplied { register, value } =>
                         outputs.push(TimedOutput {
                             at, value: LineEvent::BroadcastWrite { port, register, value },
