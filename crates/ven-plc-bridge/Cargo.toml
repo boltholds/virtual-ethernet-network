@@ -1,0 +1,20 @@
+[package]
+name = "ven-plc-bridge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+sim-time = { path = "../sim-time" }
+sim-kernel = { path = "../sim-kernel" }
+serde_json = "1"
+ven-core = { path = "../ven-core" }
+ven-modbus = { path = "../ven-modbus" }
+ven-modbus-sim = { path = "../ven-modbus-sim" }
+ven-topology = { path = "../ven-topology" }
+
+[dev-dependencies]
+ven-medium = { path = "../ven-medium" }
+ven-rs485-phy = { path = "../ven-rs485-phy" }
+ven-sim = { path = "../ven-sim" }
