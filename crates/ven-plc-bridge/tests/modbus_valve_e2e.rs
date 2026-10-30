@@ -144,8 +144,17 @@ fn run_case(lod: BusLod, stuck: bool) -> Vec<(SimInstant, bool)> {
         r.at == SimInstant::from_nanos(100_000_000)));
     assert!(report.deliveries.iter().any(|r| r.source == NET && r.target == VALVE &&
         r.at > SimInstant::from_nanos(100_000_000)));
-    assert!(report.deliveries.iter().any(|r| r.source == VALVE && r.target == NET &&
-        r.at > SimInstant::from_nanos(150_000_000)));
+    if stuck {
+        // A mechanically stuck valve has no completion event; its fault
+        // feedback is published at the initial virtual timestamp instead.
+        assert!(report.deliveries.iter().any(|r| r.source == VALVE && r.target == NET
+            && r.at == SimInstant::ZERO));
+        assert!(!report.deliveries.iter().any(|r| r.source == VALVE && r.target == NET
+            && r.at > SimInstant::from_nanos(150_000_000)));
+    } else {
+        assert!(report.deliveries.iter().any(|r| r.source == VALVE && r.target == NET
+            && r.at > SimInstant::from_nanos(150_000_000)));
+    }
     assert!(report.deliveries.iter().any(|r| r.source == NET && r.target == PLC &&
         r.at > SimInstant::from_nanos(100_000_000)));
     assert!(!host.is_poisoned());
