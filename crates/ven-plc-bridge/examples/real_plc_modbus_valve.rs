@@ -45,7 +45,7 @@ impl CausalParticipant<IoMessage> for Observer {
     fn receive(&mut self, input: CausalInput<IoMessage>) -> Result<(), ActorError> {
         match input.payload {
             IoMessage::PlcOutput { key, value: SignalValue::Bool(open) }
-                if key == SignalKey::new("monitor_open")? =>
+                if key.as_str() == "monitor_open" =>
             {
                 self.seen.lock().expect("observer mutex").push((input.at, open));
                 Ok(())
