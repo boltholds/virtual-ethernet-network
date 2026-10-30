@@ -19,7 +19,7 @@ use ven_plc_bridge::modbus_valve::{ValveModbusConfig, ValveModbusGateway};
 use ven_plc_bridge::plant::{ValveConfig, ValveFault, ValveGeometry, ValvePlantActor};
 use ven_modbus::{RtuTiming};
 use ven_modbus_sim::{BusLod, ModbusBus};
-use ven_rs485_phy::{IdleLine, Rs485DigitalPhy, TransceiverProfile};
+use ven_rs485_phy::{IdleLine, Rs485DigitalPhy, TransceiverProfile, SampleFault};
 use ven_sim::VenNetwork;
 use ven_topology::{BusId, InterfaceKind, NodeId, Port};
 
@@ -179,4 +179,74 @@ fn stuck_valve_never_reports_open_despite_valid_fc06_and_fc03() {
         assert!(signals.iter().any(|(_, open)| !open));
         assert!(signals.iter().all(|(_, open)| !open));
     }
+}
+
+
+struct StatusCollector {
+    now: SimInstant,
+    faults: Arc<Mutex<Vec<(SimInstant, bool)>>>,
+}
+impl CausalParticipant<IoMessage> for StatusCollector {
+    fn current_time(&self) -> SimInstant { self.now }
+    fn next_wakeup(&self) -> Option<SimInstant> { None }
+    fn advance(&mut self, grant: TimeGrant)
+        -> Result<AdvanceOutcome<DirectedEvent<IoMessage>>, ActorError>
+    {
+        self.now = grant.until;
+        Ok(AdvanceOutcome { reached: self.now, outputs: Vec::new(), next_wakeup: None })
+    }
+    fn receive(&mut self, input: CausalInput<IoMessage>) -> Result<(), ActorError> {
+        match input.payload {
+            IoMessage::PlcInput { key, value: SignalValue::Bool(fault) }
+                if key.as_str() == "valve.comm_fault" => {
+                self.faults.lock().unwrap().push((input.at, fault));
+                Ok(())
+            }
+            _ => Err("unexpected PLC status input".into()),
+        }
+    }
+}
+
+#[test]
+fn uart_parity_fault_blocks_slave_command_and_reports_communication_timeout() {
+    let mut bus = network(BusLod::DigitalBits);
+    bus.digital_mut().unwrap().phy_mut()
+        .inject_sample_fault(PortId(2), 0, 9, SampleFault::Flip).unwrap();
+    let gateway = ValveModbusGateway::new(bus, ValveModbusConfig {
+        plc: PLC, plant: VALVE, master_port: PortId(1), slave_port: PortId(2),
+        slave_address: 2,
+        command_key: key("valve_cmd"),
+        opened_key: key("valve.opened"),
+        closed_key: key("valve.closed"),
+        fault_key: key("valve.fault"),
+        communication_fault_key: key("valve.comm_fault"),
+    }).unwrap();
+    let valve = ValvePlantActor::new(ValveConfig {
+        plc: NET,
+        command_key: key("valve_cmd"),
+        opened_key: key("valve.opened"),
+        closed_key: key("valve.closed"),
+        fault_key: key("valve.fault"),
+        open_duration: SimDuration::from_nanos(100_000_000),
+        close_duration: SimDuration::from_nanos(100_000_000),
+        geometry: ValveGeometry::Unbound,
+    }).unwrap();
+    let faults = Arc::new(Mutex::new(Vec::new()));
+    let mut host = ConservativeCoordinator::<IoMessage, BusId>::new();
+    host.register(PLC, Claims::NoExclusiveResources, Box::new(StatusCollector {
+        now: SimInstant::ZERO, faults: Arc::clone(&faults),
+    })).unwrap();
+    host.register(NET, Claims::Exclusive(vec![BusId(7)]), Box::new(gateway)).unwrap();
+    host.register(VALVE, Claims::NoExclusiveResources, Box::new(valve)).unwrap();
+    host.inject_now(NET, PLC, IoMessage::PlcOutput {
+        key: key("valve_cmd"), value: SignalValue::Bool(true),
+    }).unwrap();
+    let trace = host.advance_to(SimInstant::from_nanos(200_000_000)).unwrap();
+    assert!(!trace.deliveries.iter().any(|receipt|
+        receipt.source == NET && receipt.target == VALVE
+    ), "damaged command must never actuate valve");
+    assert!(faults.lock().unwrap().iter().any(|(at, active)|
+        *active && *at > SimInstant::from_nanos(100_000_000)
+    ), "a Modbus timeout must be reflected as an explicit fault signal");
+    assert!(!host.is_poisoned());
 }
