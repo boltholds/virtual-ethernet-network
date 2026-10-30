@@ -22,6 +22,14 @@ Cross-LOD integration tests assert one matching FC03 reply, broadcast writes wit
 
 **Boundary:** One `ModbusBus` owns one transport. The new `ModbusBusHost` additionally rejects different registered participants claiming the same `BusId` (including mixed LOD modes) using atomic session-scoped claims. The minimal time coordinator remains single-participant; unregistered runners and separate registries are not automatically detected. The digital PHY remains a digital/logic model, not analog electrical conformance.
 
+## Valve equipment gateway (engineering vertical slice)
+
+`ven-plc-bridge::modbus_valve::ValveModbusGateway` owns one `ModbusBus` as a `CausalParticipant`, with no parallel duplicate transport. It serializes PLC FC06 write requests and FC03 sensor polls. A new `LineEvent::SlaveWrite` is emitted only for a **successfully applied** addressed FC06 write, with the slave receive completion time; only then can the valve process actor begin motion. The master's acknowledgement does not trigger a second actuator command.
+
+The physical valve's digital open/closed/fault signals update the configured slave holding registers, from which the PLC retrieves a complete three-register snapshot over FC03. Modbus exceptions and request timeouts assert an explicit PLC communication fault input rather than inventing position feedback. All messages preserve the conservative coordinator's virtual-time barrier ordering. A bounded request queue prevents unbounded accumulation, and redundant in-flight sensor polls are coalesced.
+
+Tests cover both `CharacterTimed` and `DigitalBits` with a subprocess-protocol fixture, normal movement, a stuck valve and a parity-corrupted FC06 that must not actuate the valve. See [PLC_MODBUS_VALVE.md](PLC_MODBUS_VALVE.md). This is **not** certification for device-specific Modbus maps or real valves.
+
 ## Not implemented
 
 - Full Modbus application model: only functions 0x03 and 0x06 are implemented; remaining function codes, full register/device configuration and extended exception policies are not. Automatic retries are not implemented. DE/RE turnaround is now modeled separately from RTU `t3.5`, with configurable delays, but without electrical pin/waveform simulation.

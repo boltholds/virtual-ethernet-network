@@ -46,7 +46,7 @@ The optional `ValveGeometry::Snapshot` carries a strict `GeometrySnapshotRef` to
 - Python subprocess communication is **synchronous blocking I/O**, with bounded response size but no watchdog/timeouts or sandbox. It is suitable for local controlled proof of concept only. A hanging Python worker can hang the coordinator; a hardened local IPC transport must impose a deadline and process termination policy.
 - No mutual authentication, shared-machine tenancy isolation, deployment orchestration, distributed snapshots/recovery, hard real-time PLC timing or hot schema migration.
 - Current Python ScheduledRuntime scalar inputs are `bool|int|float`. Unsupported/undefined values reject explicitly, without converting them to false or zero. Rich IEC data types require a versioned extension.
-- Real VEN RS-485/Modbus event routing is not yet wired into the valve pilot. That separate LOD layer is already available through `CausalModbusBridge` and should be reused, not duplicated.
+- **New:** The optional `ValveModbusGateway` now routes actual Modbus FC06/FC03 transactions for a separate end-to-end valve scenario. Its `SlaveWrite` event is triggered at slave acceptance, **not** at master reply. The earlier simple `real_plc_valve` example remains a direct-causal baseline; run `real_plc_modbus_valve` for the serial network path. Both character and digital-bit LOD versions pass standalone Rust integration tests using an explicitly synthetic Python protocol fixture. The real Python worker cross-repository runner has not yet executed.
 - The physical plant state is discrete, not a Gefest computational mechanics engine. It requires independent acceptance criteria for valve motion delays, interlock timeouts, and fault injection.
 - The two GitHub PRs remain independent and unmerged; **nothing changes the deployed PLC Web backend or VEN main branch**.
 
@@ -54,4 +54,4 @@ The optional `ValveGeometry::Snapshot` carries a strict `GeometrySnapshotRef` to
 
 - PLC Web feature branch: `backend/src/backend/services/scheduled_runtime_adapter.py`, `virtual_plc.py` and `interfaces.py`.
 - Python worker: `backend/src/backend/services/ven_runtime_worker.py`, tested in `backend/tests/test_ven_runtime_worker.py`.
-- VEN: `crates/ven-plc-bridge/src/lib.rs`, `plant.rs`, example and tests.
+- VEN: `crates/ven-plc-bridge/src/lib.rs`, `plant.rs`, `modbus_valve.rs`, both examples and tests. Modbus internals: `ven-modbus-sim::LineEvent::SlaveWrite` is published in both character/digital adapters. See [PLC_MODBUS_VALVE.md](PLC_MODBUS_VALVE.md).
